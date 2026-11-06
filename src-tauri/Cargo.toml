@@ -1,0 +1,46 @@
+[package]
+name = "hardhub"
+version = "1.0.0"
+description = "macOS Storage Control Center — Space Lens, Offline Drive Vault, Safe Force Eject & Link Inspector"
+authors = ["Hard Suite"]
+edition = "2021"
+
+[lib]
+name = "hardhub_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3"] }
+sysinfo = "0.33"
+walkdir = "2.5"
+rayon = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+libc = "0.2"
+plist = "1"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+
+[profile.dev]
+opt-level = 2
+codegen-units = 1
+incremental = false
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+

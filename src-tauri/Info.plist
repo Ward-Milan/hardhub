@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>HardHub analyse et optimise l'espace de vos disques et dossiers.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>HardHub analyse et optimise l'espace de vos disques et dossiers.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>HardHub analyse et optimise l'espace de vos disques et dossiers.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>HardHub gère, nettoie et éjecte vos cartes SD, clés USB et disques externes.</string>
+</dict>
+</plist>
+
