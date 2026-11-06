@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { Sparkles, Activity } from "lucide-react";
 
 interface Props {
   icon: ReactNode;
   title: string;
   subtitle?: string;
-  color?: "emerald" | "blue" | "purple" | "amber";
+  color?: "emerald" | "blue" | "purple" | "amber" | "cyan";
   stages?: string[];
+  itemCount?: number;
+  progressPercent?: number;
 }
 
 export default function ScanningRadar({
@@ -15,11 +18,13 @@ export default function ScanningRadar({
   subtitle,
   color = "emerald",
   stages = [
-    "Lecture de l'arborescence et métadonnées...",
-    "Exploration parallèle multi-cœur active...",
+    "Lecture de l'arborescence et metadonnees...",
+    "Exploration parallele multi-coeur active...",
     "Calcul des blocs et allocations physiques...",
-    "Génération de la synthèse visuelle...",
+    "Generation de la synthese visuelle...",
   ],
+  itemCount,
+  progressPercent,
 }: Props) {
   const [currentStageIdx, setCurrentStageIdx] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -38,7 +43,7 @@ export default function ScanningRadar({
     if (stages.length <= 1) return;
     const interval = setInterval(() => {
       setCurrentStageIdx((prev) => (prev + 1) % stages.length);
-    }, 2400);
+    }, 2200);
     return () => clearInterval(interval);
   }, [stages]);
 
@@ -53,42 +58,60 @@ export default function ScanningRadar({
       accent: "text-[#10B981]",
       border: "border-[#10B981]/30",
       bgLight: "bg-[#10B981]/10",
-      glow: "shadow-[0_0_30px_rgba(16,185,129,0.18)]",
+      ambientGlow: "bg-[#10B981]/10",
       radarStroke: "#10B981",
       beamColor: "from-[#10B981]/25",
+      barColor: "bg-[#10B981]",
     },
     blue: {
       accent: "text-[#3B82F6]",
       border: "border-[#3B82F6]/30",
       bgLight: "bg-[#3B82F6]/10",
-      glow: "shadow-[0_0_30px_rgba(59,130,246,0.18)]",
+      ambientGlow: "bg-[#3B82F6]/10",
       radarStroke: "#3B82F6",
       beamColor: "from-[#3B82F6]/25",
+      barColor: "bg-[#3B82F6]",
     },
     purple: {
       accent: "text-[#8B5CF6]",
       border: "border-[#8B5CF6]/30",
       bgLight: "bg-[#8B5CF6]/10",
-      glow: "shadow-[0_0_30px_rgba(139,92,246,0.18)]",
+      ambientGlow: "bg-[#8B5CF6]/10",
       radarStroke: "#8B5CF6",
       beamColor: "from-[#8B5CF6]/25",
+      barColor: "bg-[#8B5CF6]",
     },
     amber: {
       accent: "text-[#F59E0B]",
       border: "border-[#F59E0B]/30",
       bgLight: "bg-[#F59E0B]/10",
-      glow: "shadow-[0_0_30px_rgba(245,158,11,0.18)]",
+      ambientGlow: "bg-[#F59E0B]/10",
       radarStroke: "#F59E0B",
       beamColor: "from-[#F59E0B]/25",
+      barColor: "bg-[#F59E0B]",
+    },
+    cyan: {
+      accent: "text-[#06B6D4]",
+      border: "border-[#06B6D4]/30",
+      bgLight: "bg-[#06B6D4]/10",
+      ambientGlow: "bg-[#06B6D4]/10",
+      radarStroke: "#06B6D4",
+      beamColor: "from-[#06B6D4]/25",
+      barColor: "bg-[#06B6D4]",
     },
   }[color];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 select-none">
-      <div className="relative flex items-center justify-center w-64 h-64 mb-6">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 select-none relative overflow-hidden min-h-[320px]">
+      {/* Ambient background blur glow */}
+      <div
+        className={`absolute w-80 h-80 rounded-full ${colorConfig.ambientGlow} blur-3xl pointer-events-none -top-10 left-1/2 -translate-x-1/2 opacity-60`}
+      />
+
+      <div className="relative flex items-center justify-center w-60 h-60 mb-5 z-10">
         {/* Pulsing Sonar Ring 1 */}
         <div
-          className={`absolute w-52 h-52 rounded-full border border-dashed ${colorConfig.border} animate-ping opacity-20 duration-1000`}
+          className={`absolute w-52 h-52 rounded-full border border-dashed ${colorConfig.border} animate-ping opacity-25 duration-1000`}
         />
 
         {/* Pulsing Sonar Ring 2 */}
@@ -127,7 +150,7 @@ export default function ScanningRadar({
         {/* Rotating Radar Sweeping Beam */}
         <div
           className="absolute w-56 h-56 rounded-full overflow-hidden pointer-events-none animate-spin"
-          style={{ animationDuration: "3s" }}
+          style={{ animationDuration: "2.8s" }}
         >
           <div
             className={`w-1/2 h-1/2 origin-bottom-right bg-gradient-to-tl ${colorConfig.beamColor} via-transparent to-transparent`}
@@ -139,7 +162,7 @@ export default function ScanningRadar({
 
         {/* Central Orb with active Tool Icon */}
         <div
-          className={`relative z-10 w-16 h-16 rounded-2xl ${colorConfig.bgLight} border ${colorConfig.border} ${colorConfig.accent} ${colorConfig.glow} flex items-center justify-center transition-all duration-300`}
+          className={`relative z-10 w-16 h-16 rounded-2xl ${colorConfig.bgLight} border ${colorConfig.border} ${colorConfig.accent} shadow-2xl flex items-center justify-center transition-all duration-300`}
         >
           <div className="w-8 h-8 flex items-center justify-center">
             {icon}
@@ -148,7 +171,7 @@ export default function ScanningRadar({
       </div>
 
       {/* Title & Technical Milestones */}
-      <div className="text-center max-w-md space-y-2">
+      <div className="text-center max-w-md space-y-2 z-10">
         <h3 className="text-base font-bold text-[#EDEDEC] tracking-tight">
           {title}
         </h3>
@@ -157,45 +180,70 @@ export default function ScanningRadar({
         <div className="h-6 flex items-center justify-center">
           <p
             key={currentStageIdx}
-            className="text-xs text-[#9B9A97] font-medium transition-all duration-300 animate-fadeIn"
+            className="text-xs text-[#9B9A97] font-medium transition-all duration-300"
           >
             {stages[currentStageIdx]}
           </p>
         </div>
 
-        {/* Live Multi-Core Activity Bars & Chronometer */}
-        <div className="pt-3 flex items-center justify-center gap-4">
+        {/* Live Multi-Core Activity Bars & Chronometer & Item Count */}
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
           {/* Animated CPU/Thread Wave Bars */}
-          <div className="flex items-end gap-1 h-4">
+          <div className="flex items-end gap-1 h-3.5 px-2 py-1 rounded bg-[#161616] border border-[#272727]">
             <span
-              className={`w-1 bg-[#10B981] rounded-full animate-bounce`}
+              className="w-1 bg-[#10B981] rounded-full animate-bounce"
               style={{ height: "40%", animationDelay: "0ms" }}
             />
             <span
-              className={`w-1 bg-[#3B82F6] rounded-full animate-bounce`}
+              className="w-1 bg-[#3B82F6] rounded-full animate-bounce"
               style={{ height: "100%", animationDelay: "150ms" }}
             />
             <span
-              className={`w-1 bg-[#10B981] rounded-full animate-bounce`}
+              className="w-1 bg-[#10B981] rounded-full animate-bounce"
               style={{ height: "70%", animationDelay: "300ms" }}
             />
             <span
-              className={`w-1 bg-[#8B5CF6] rounded-full animate-bounce`}
+              className="w-1 bg-[#8B5CF6] rounded-full animate-bounce"
               style={{ height: "90%", animationDelay: "450ms" }}
             />
             <span
-              className={`w-1 bg-[#3B82F6] rounded-full animate-bounce`}
+              className="w-1 bg-[#3B82F6] rounded-full animate-bounce"
               style={{ height: "50%", animationDelay: "600ms" }}
             />
           </div>
 
-          <span className="text-[11px] font-mono text-[#787774] px-2 py-0.5 rounded bg-[#161616] border border-[#272727]">
+          {/* Chronometer */}
+          <span className="text-[11px] font-mono text-[#EDEDEC] px-2.5 py-1 rounded-lg bg-[#161616] border border-[#272727]">
             {formattedTime}
           </span>
+
+          {/* Scanned Items Count if provided */}
+          {itemCount !== undefined && itemCount > 0 && (
+            <span className="text-[11px] font-mono text-[#9B9A97] px-2.5 py-1 rounded-lg bg-[#161616] border border-[#272727] flex items-center gap-1.5">
+              <Activity className="w-3 h-3 text-[#10B981]" />
+              <span>{itemCount.toLocaleString()} elements</span>
+            </span>
+          )}
         </div>
 
+        {/* Optional Progress Bar */}
+        {progressPercent !== undefined && progressPercent >= 0 && (
+          <div className="pt-2 w-full max-w-xs mx-auto space-y-1">
+            <div className="flex items-center justify-between text-[10px] font-mono text-[#9B9A97]">
+              <span>Avancement</span>
+              <span className="text-[#EDEDEC] font-bold">{Math.round(progressPercent)}%</span>
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-[#141414] border border-[#2A2A2A] overflow-hidden">
+              <div
+                style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+                className={`h-full rounded-full ${colorConfig.barColor} transition-all duration-300`}
+              />
+            </div>
+          </div>
+        )}
+
         {subtitle && (
-          <p className="text-[11px] text-[#555555] font-mono pt-1">
+          <p className="text-[11px] text-[#787774] font-mono pt-1 max-w-xs mx-auto truncate" title={subtitle}>
             {subtitle}
           </p>
         )}
@@ -203,4 +251,3 @@ export default function ScanningRadar({
     </div>
   );
 }
-

@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use sysinfo::Disks;
+
+static USB_SPEEDS_CACHE: Mutex<Option<(Instant, HashMap<String, u32>)>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,8 +101,16 @@ fn query_diskutil_info(mount_point: &str) -> DiskutilMetadata {
     meta
 }
 
-/// Queries USB bus link speeds via `system_profiler SPUSBDataType` to detect USB 2.0 cable bottlenecks.
+/// Queries USB bus link speeds via `system_profiler SPUSBDataType` to detect USB 2.0 cable bottlenecks (cached 30s).
 fn query_usb_bus_speeds() -> HashMap<String, u32> {
+    if let Ok(guard) = USB_SPEEDS_CACHE.lock() {
+        if let Some((cached_at, ref map)) = *guard {
+            if cached_at.elapsed() < Duration::from_secs(30) {
+                return map.clone();
+            }
+        }
+    }
+
     let mut map = HashMap::new();
     let output = Command::new("/usr/sbin/system_profiler")
         .args(["SPUSBDataType", "-detailLevel", "mini"])
@@ -131,6 +143,11 @@ fn query_usb_bus_speeds() -> HashMap<String, u32> {
             }
         }
     }
+
+    if let Ok(mut guard) = USB_SPEEDS_CACHE.lock() {
+        *guard = Some((Instant::now(), map.clone()));
+    }
+
     map
 }
 
@@ -140,13 +157,13 @@ fn calculate_hidden_trash_bytes(mount_point: &str) -> u64 {
         // For internal Mac drive, check ~/.Trash
         if let Ok(home) = std::env::var("HOME") {
             let user_trash = PathBuf::from(home).join(".Trash");
-            return fast_dir_size(&user_trash, 4000);
+            return fast_dir_size(&user_trash, 400);
         }
         return 0;
     }
 
     let trashes = Path::new(mount_point).join(".Trashes");
-    fast_dir_size(&trashes, 4000)
+    fast_dir_size(&trashes, 400)
 }
 
 fn fast_dir_size(path: &Path, max_entries: usize) -> u64 {

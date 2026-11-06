@@ -3,9 +3,13 @@ export type HardHubTab =
   | "spacelens"
   | "catalog"
   | "duplicates"
-  | "uninstaller"
   | "largefiles"
-  | "tools";
+  | "uninstaller"
+  | "cleaner"
+  | "diagnostics"
+  | "disks";
+
+export type StorageDrive = StorageDriveInfo;
 
 export interface StorageDriveInfo {
   id: string;

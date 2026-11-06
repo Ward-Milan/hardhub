@@ -24,6 +24,8 @@ import {
   ArrowRight,
   ArrowDownToLine,
   Sparkles,
+  Activity,
+  Layers,
 } from "lucide-react";
 import {
   HardHubLogo,
@@ -44,7 +46,10 @@ import CatalogView from "./CatalogView";
 import DuplicatesView from "./DuplicatesView";
 import LargeFilesView from "./LargeFilesView";
 import UninstallerView from "./UninstallerView";
-import ToolsView from "./ToolsView";
+import CleanerPurgeView from "./CleanerPurgeView";
+import DiagnosticsView from "./DiagnosticsView";
+import DiskManagerView from "./DiskManagerView";
+import DriveCard from "./DriveCard";
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 o";
@@ -109,16 +114,33 @@ export default function App() {
     }, 3500);
   };
 
-  const refreshDrives = async () => {
-    setIsRefreshing(true);
+  const refreshDrives = async (silent: boolean = false) => {
+    if (!silent) setIsRefreshing(true);
     try {
       const list = await invoke<StorageDriveInfo[]>("get_storage_drives");
-      setDrives(list);
+      setDrives((prev) => {
+        if (prev.length === list.length) {
+          const isIdentical = prev.every((d, i) => {
+            const o = list[i];
+            return (
+              o &&
+              d.id === o.id &&
+              d.mountPoint === o.mountPoint &&
+              d.availableBytes === o.availableBytes &&
+              d.usedBytes === o.usedBytes &&
+              d.isEncrypted === o.isEncrypted &&
+              d.hiddenTrashBytes === o.hiddenTrashBytes
+            );
+          });
+          if (isIdentical) return prev;
+        }
+        return list;
+      });
       invoke("refresh_tray_menu_cmd").catch(() => {});
     } catch (err) {
-      setErrorBanner(String(err));
+      if (!silent) setErrorBanner(String(err));
     } finally {
-      setIsRefreshing(false);
+      if (!silent) setIsRefreshing(false);
     }
   };
 
@@ -219,8 +241,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    refreshDrives();
-    const timer = setInterval(refreshDrives, 6000);
+    refreshDrives(false);
+    const timer = setInterval(() => refreshDrives(true), 20000);
     return () => clearInterval(timer);
   }, []);
 
@@ -377,7 +399,7 @@ export default function App() {
           )}
 
           <button
-            onClick={refreshDrives}
+            onClick={() => refreshDrives(false)}
             className="flex items-center gap-1.5 text-xs font-medium text-[#9B9A97] hover:text-[#EDEDEC] hover:bg-[#252525] border border-[#2F2F2F] px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
           >
             <RefreshCw
@@ -533,20 +555,56 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setActiveTab("tools")}
+              onClick={() => setActiveTab("cleaner")}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                activeTab === "tools"
+                activeTab === "cleaner"
                   ? "bg-[#242424] text-[#EDEDEC] border border-[#383838]"
                   : "text-[#9B9A97] hover:text-[#EDEDEC] hover:bg-[#1C1C1C] border border-transparent"
               }`}
             >
               <div className="flex items-center gap-2.5">
-                <Wrench
+                <Sparkles
                   className={`w-4 h-4 ${
-                    activeTab === "tools" ? "text-[#10B981]" : "text-[#9B9A97]"
+                    activeTab === "cleaner" ? "text-[#10B981]" : "text-[#9B9A97]"
                   }`}
                 />
-                <span>Outils &amp; Purge</span>
+                <span>Nettoyage &amp; Purge</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("diagnostics")}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "diagnostics"
+                  ? "bg-[#242424] text-[#EDEDEC] border border-[#383838]"
+                  : "text-[#9B9A97] hover:text-[#EDEDEC] hover:bg-[#1C1C1C] border border-transparent"
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Activity
+                  className={`w-4 h-4 ${
+                    activeTab === "diagnostics" ? "text-[#06B6D4]" : "text-[#9B9A97]"
+                  }`}
+                />
+                <span>Sante &amp; Debit</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("disks")}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                activeTab === "disks"
+                  ? "bg-[#242424] text-[#EDEDEC] border border-[#383838]"
+                  : "text-[#9B9A97] hover:text-[#EDEDEC] hover:bg-[#1C1C1C] border border-transparent"
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Layers
+                  className={`w-4 h-4 ${
+                    activeTab === "disks" ? "text-[#8B5CF6]" : "text-[#9B9A97]"
+                  }`}
+                />
+                <span>Disques &amp; Format</span>
               </div>
             </button>
           </div>
@@ -579,361 +637,51 @@ export default function App() {
                       </span>
                     </div>
                     <button
-                      onClick={refreshDrives}
+                      onClick={() => refreshDrives(false)}
                       className="px-3 py-1 rounded-lg bg-[#262626] hover:bg-[#303030] border border-[#353535] text-xs text-[#EDEDEC] cursor-pointer"
                     >
                       Actualiser
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {externalDrives.map((drive) => {
-                      const usedPct =
-                        drive.totalBytes > 0
-                          ? Math.min(
-                              100,
-                              Math.round(
-                                (drive.usedBytes / drive.totalBytes) * 100
-                              )
-                            )
-                          : 0;
-                      const isCriticallyFull = usedPct >= 90;
-
-                      return (
-                        <div
-                          key={drive.id}
-                          className="bg-[#202020] hover:bg-[#232323] border border-[#2F2F2F] hover:border-[#383838] rounded-2xl p-5 flex flex-col justify-between gap-4 transition-all shadow-sm"
-                        >
-                          <div className="space-y-3">
-                            {/* Header */}
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-center gap-3.5 min-w-0">
-                                <div
-                                  className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 ${
-                                    drive.deviceType === "sd_card"
-                                      ? "bg-[#F59E0B]/15 border-[#F59E0B]/30 text-[#FBBF24]"
-                                      : "bg-[#3B82F6]/15 border-[#3B82F6]/30 text-[#60A5FA]"
-                                  }`}
-                                >
-                                  <DriveTypeIcon
-                                    deviceType={drive.deviceType}
-                                    className="w-5 h-5"
-                                  />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5">
-                                    <h3
-                                      className="font-bold text-sm text-[#EDEDEC] truncate"
-                                      title={drive.name}
-                                    >
-                                      {drive.name}
-                                    </h3>
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#2A2A2A] text-[#93C5FD]">
-                                      {drive.fileSystem}
-                                    </span>
-                                  </div>
-                                  <p className="text-[11px] font-mono text-[#787774] mt-0.5">
-                                    /dev/{drive.bsdName}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <button
-                                onClick={() => handleSafeEject(drive, false)}
-                                disabled={isEjecting === drive.id}
-                                className="px-3 py-1.5 rounded-xl bg-[#2A2A2A] hover:bg-[#F59E0B] hover:text-black border border-[#3A3A3A] text-xs font-medium text-[#EDEDEC] flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                                title="Éjection intelligente sécurisée"
-                              >
-                                <EjectSvgIcon className="w-3 h-3" />
-                                <span>
-                                  {isEjecting === drive.id ? "…" : "Éjecter"}
-                                </span>
-                              </button>
-                            </div>
-
-                            {/* Space Usage Bar */}
-                            <div className="space-y-1.5 pt-1">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-[#9B9A97]">
-                                  <strong className="text-[#EDEDEC] font-semibold">
-                                    {formatBytes(drive.availableBytes)}
-                                  </strong>{" "}
-                                  libres
-                                </span>
-                                <span className="font-mono text-[11px] text-[#787774]">
-                                  {formatBytes(drive.usedBytes)} /{" "}
-                                  {formatBytes(drive.totalBytes)} ({usedPct}%)
-                                </span>
-                              </div>
-                              <div className="w-full h-2 rounded-full bg-[#141414] overflow-hidden border border-[#272727]">
-                                <div
-                                  style={{ width: `${usedPct}%` }}
-                                  className={`h-full rounded-full transition-all ${
-                                    isCriticallyFull
-                                      ? "bg-[#EF4444]"
-                                      : usedPct >= 75
-                                      ? "bg-[#F59E0B]"
-                                      : "bg-[#10B981]"
-                                  }`}
-                                />
-                              </div>
-                            </div>
-
-                            {/* Link Speed, Hidden Trash & Encryption Badges */}
-                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                              <span
-                                className={`text-[10px] font-mono px-2 py-0.5 rounded-md border flex items-center gap-1 ${
-                                  drive.isCableBottlenecked
-                                    ? "bg-[#EF4444]/15 border-[#EF4444]/40 text-[#FCA5A5]"
-                                    : "bg-[#171717] border-[#2C2C2C] text-[#9B9A97]"
-                                }`}
-                                title={drive.cableWarning || drive.linkSpeedLabel}
-                              >
-                                <Zap
-                                  className={`w-3 h-3 ${
-                                    drive.isCableBottlenecked
-                                      ? "text-[#EF4444]"
-                                      : "text-[#10B981]"
-                                  }`}
-                                />
-                                <span>{drive.linkSpeedLabel}</span>
-                              </span>
-
-                              {/* Encryption Badge */}
-                              <span
-                                className={`text-[10px] font-mono px-2 py-0.5 rounded-md border flex items-center gap-1 ${
-                                  drive.isEncrypted
-                                    ? "bg-[#10B981]/15 border-[#10B981]/30 text-[#34D399]"
-                                    : "bg-[#F59E0B]/15 border-[#F59E0B]/30 text-[#FBBF24]"
-                                }`}
-                                title={
-                                  drive.isEncrypted
-                                    ? "Support chiffré et sécurisé par mot de passe"
-                                    : "Données stockées en clair. Aucun mot de passe requis."
-                                }
-                              >
-                                {drive.isEncrypted ? (
-                                  <>
-                                    <Lock className="w-3 h-3 text-[#10B981]" />
-                                    <span>Chiffré</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Unlock className="w-3 h-3 text-[#F59E0B]" />
-                                    <span>Non chiffré</span>
-                                  </>
-                                )}
-                              </span>
-
-                              {drive.canEncrypt && (
-                                <button
-                                  onClick={() => {
-                                    setEncryptTargetDrive(drive);
-                                    setEncryptPassphrase("");
-                                    setEncryptConfirmPassphrase("");
-                                  }}
-                                  className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-[#3B82F6]/15 hover:bg-[#3B82F6]/25 border border-[#3B82F6]/30 text-[#60A5FA] flex items-center gap-1 transition-colors cursor-pointer"
-                                  title="Verrouiller ce disque avec un mot de passe sécurisé (chiffrement APFS)"
-                                >
-                                  <ShieldCheck className="w-3 h-3" />
-                                  <span>Chiffrer</span>
-                                </button>
-                              )}
-
-                              {drive.hiddenTrashBytes > 0 && (
-                                <button
-                                  onClick={() => handleQuickPurgeTrash(drive)}
-                                  className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[#F59E0B]/15 hover:bg-[#F59E0B]/25 border border-[#F59E0B]/35 text-[#FBBF24] flex items-center gap-1 transition-colors cursor-pointer"
-                                  title="Vider immédiatement la corbeille cachée .Trashes de ce disque"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                  <span>
-                                    .Trashes : {formatBytes(drive.hiddenTrashBytes)}
-                                  </span>
-                                </button>
-                              )}
-                            </div>
-
-                            {drive.isCableBottlenecked && drive.cableWarning && (
-                              <div className="p-2 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[11px] text-[#FCA5A5] flex items-center gap-2">
-                                <ShieldAlert className="w-3.5 h-3.5 text-[#EF4444] shrink-0" />
-                                <span>{drive.cableWarning}</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Footer Actions */}
-                          <div className="pt-2.5 border-t border-[#2A2A2A] flex items-center justify-between gap-2">
-                            <button
-                              onClick={() =>
-                                handleOpenBlockerInspector(drive)
-                              }
-                              className="px-2.5 py-1 rounded-lg bg-[#191919] hover:bg-[#2A2A2A] border border-[#2E2E2E] text-[11px] text-[#9B9A97] hover:text-[#EDEDEC] flex items-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <Lock className="w-3 h-3 text-[#F59E0B]" />
-                              <span>Qui bloque ?</span>
-                            </button>
-
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() =>
-                                  handleRevealFinder(drive.mountPoint)
-                                }
-                                className="px-2.5 py-1 rounded-lg bg-[#191919] hover:bg-[#2A2A2A] border border-[#2E2E2E] text-[11px] text-[#9B9A97] hover:text-[#EDEDEC] flex items-center gap-1 transition-colors cursor-pointer"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                <span>Finder</span>
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  openDriveInSpaceLens(drive.mountPoint)
-                                }
-                                className="px-2.5 py-1 rounded-lg bg-[#3B82F6]/15 hover:bg-[#3B82F6]/25 border border-[#3B82F6]/35 text-[11px] font-medium text-[#60A5FA] transition-colors cursor-pointer"
-                              >
-                                Space Lens →
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {externalDrives.map((drive) => (
+                      <DriveCard
+                        key={drive.id}
+                        drive={drive}
+                        isEjecting={isEjecting === drive.id}
+                        onEject={(d) => handleSafeEject(d, false)}
+                        onRevealFinder={handleRevealFinder}
+                        onOpenSpaceLens={openDriveInSpaceLens}
+                        onQuickPurgeTrash={handleQuickPurgeTrash}
+                        onOpenBlockerInspector={handleOpenBlockerInspector}
+                        onEncryptDrive={(d) => {
+                          setEncryptTargetDrive(d);
+                          setEncryptPassphrase("");
+                          setEncryptConfirmPassphrase("");
+                        }}
+                      />
+                    ))}
                   </div>
                 )}
               </section>
 
-              {/* ================= INTERNAL STORAGE SECTION ================= */}
+              {/* Internal Mac Storage */}
               <section className="space-y-3">
                 <span className="text-xs font-semibold text-[#9B9A97]">
                   Stockage interne Mac ({internalDrives.length})
                 </span>
 
-                <div
-                  className={
-                    internalDrives.length === 1
-                      ? "grid grid-cols-1 max-w-2xl"
-                      : "grid grid-cols-1 md:grid-cols-2 gap-4"
-                  }
-                >
-                  {internalDrives.map((drive) => {
-                    const usedPct =
-                      drive.totalBytes > 0
-                        ? Math.min(
-                            100,
-                            Math.round(
-                              (drive.usedBytes / drive.totalBytes) * 100
-                            )
-                          )
-                        : 0;
-
-                    return (
-                      <div
-                        key={drive.id}
-                        className="bg-[#202020] hover:bg-[#232323] border border-[#2F2F2F] hover:border-[#383838] rounded-2xl p-5 flex flex-col justify-between gap-4 transition-all shadow-sm"
-                      >
-                        {/* Header: Identity & Actions */}
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <div className="w-11 h-11 rounded-xl bg-[#10B981]/15 border border-[#10B981]/30 text-[#34D399] flex items-center justify-center shrink-0">
-                              <DriveTypeIcon
-                                deviceType={drive.deviceType}
-                                className="w-6 h-6"
-                              />
-                            </div>
-
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-sm text-[#EDEDEC] truncate">
-                                  {drive.name}
-                                </h3>
-                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#2A2A2A] text-[#9B9A97]">
-                                  {drive.fileSystem}
-                                </span>
-                              </div>
-
-                              {/* Badges line: FileVault + NVMe Speed */}
-                              <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                <span
-                                  className={`text-[10px] font-mono px-2 py-0.5 rounded-md flex items-center gap-1 ${
-                                    drive.isEncrypted
-                                      ? "bg-[#10B981]/15 border border-[#10B981]/30 text-[#34D399]"
-                                      : "bg-[#F59E0B]/15 border border-[#F59E0B]/30 text-[#FBBF24]"
-                                  }`}
-                                  title={
-                                    drive.isEncrypted
-                                      ? "Protection FileVault active"
-                                      : "FileVault désactivé"
-                                  }
-                                >
-                                  {drive.isEncrypted ? (
-                                    <Lock className="w-2.5 h-2.5" />
-                                  ) : (
-                                    <Unlock className="w-2.5 h-2.5" />
-                                  )}
-                                  <span>FileVault</span>
-                                </span>
-
-                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[#181818] border border-[#2A2A2A] text-[#787774] flex items-center gap-1">
-                                  <Zap className="w-2.5 h-2.5 text-[#10B981]" />
-                                  <span>{drive.linkSpeedLabel}</span>
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            {drive.hiddenTrashBytes > 0 && (
-                              <button
-                                onClick={() => handleQuickPurgeTrash(drive)}
-                                className="px-2.5 py-1.5 rounded-lg bg-[#F59E0B]/15 hover:bg-[#F59E0B]/25 border border-[#F59E0B]/35 text-xs text-[#FBBF24] flex items-center gap-1 transition-colors cursor-pointer"
-                                title="Vider la corbeille"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>{formatBytes(drive.hiddenTrashBytes)}</span>
-                              </button>
-                            )}
-
-                            <button
-                              onClick={() => handleRevealFinder(drive.mountPoint)}
-                              className="px-2.5 py-1.5 rounded-lg bg-[#282828] hover:bg-[#323232] border border-[#363636] text-xs font-medium text-[#EDEDEC] transition-colors cursor-pointer"
-                            >
-                              Finder
-                            </button>
-
-                            <button
-                              onClick={() =>
-                                openDriveInSpaceLens(drive.mountPoint)
-                              }
-                              className="px-3 py-1.5 rounded-lg bg-[#3B82F6]/15 hover:bg-[#3B82F6]/25 border border-[#3B82F6]/35 text-xs font-medium text-[#60A5FA] transition-colors cursor-pointer"
-                            >
-                              Space Lens →
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Space Usage Gauge */}
-                        <div className="space-y-1.5 pt-1">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[#9B9A97]">
-                              <strong className="text-[#EDEDEC] font-semibold">
-                                {formatBytes(drive.availableBytes)}
-                              </strong>{" "}
-                              libres sur {formatBytes(drive.totalBytes)}
-                            </span>
-                            <span className="font-mono text-[11px] text-[#787774]">
-                              {formatBytes(drive.usedBytes)} occupés ({usedPct}%)
-                            </span>
-                          </div>
-                          <div className="w-full h-2 rounded-full bg-[#141414] overflow-hidden border border-[#272727]">
-                            <div
-                              style={{ width: `${usedPct}%` }}
-                              className="h-full rounded-full bg-[#10B981] transition-all"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {internalDrives.map((drive) => (
+                    <DriveCard
+                      key={drive.id}
+                      drive={drive}
+                      onRevealFinder={handleRevealFinder}
+                      onOpenSpaceLens={openDriveInSpaceLens}
+                      onQuickPurgeTrash={handleQuickPurgeTrash}
+                    />
+                  ))}
                 </div>
               </section>
             </div>
@@ -988,9 +736,28 @@ export default function App() {
             />
           )}
 
-          {/* ================= TAB 7: OUTILS & PURGE ================= */}
-          {activeTab === "tools" && (
-            <ToolsView
+          {/* ================= TAB 7: NETTOYAGE & PURGE ================= */}
+          {activeTab === "cleaner" && (
+            <CleanerPurgeView
+              drives={drives}
+              onShowToast={showToast}
+              onShowError={(err) => setErrorBanner(err)}
+              onRefreshDrives={refreshDrives}
+            />
+          )}
+
+          {/* ================= TAB 8: SANTE & DEBIT ================= */}
+          {activeTab === "diagnostics" && (
+            <DiagnosticsView
+              drives={drives}
+              onShowToast={showToast}
+              onShowError={(err) => setErrorBanner(err)}
+            />
+          )}
+
+          {/* ================= TAB 9: DISQUES & FORMATAGE ================= */}
+          {activeTab === "disks" && (
+            <DiskManagerView
               drives={drives}
               onShowToast={showToast}
               onShowError={(err) => setErrorBanner(err)}

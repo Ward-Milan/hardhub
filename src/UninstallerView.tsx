@@ -24,6 +24,7 @@ import {
   Sliders,
   FileText,
 } from "lucide-react";
+import ScanningRadar from "./ScanningRadar";
 import type {
   AppDetails,
   AppResidualItem,
@@ -302,8 +303,17 @@ export default function UninstallerView({
         {/* Scrollable Apps List */}
         <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
           {isLoadingList && apps.length === 0 ? (
-            <div className="py-16 text-center text-xs text-[#787774]">
-              Scan des applications installées…
+            <div className="py-8">
+              <ScanningRadar
+                icon={<Package className="w-8 h-8 text-[#06B6D4]" />}
+                title="Inventaire des applications..."
+                color="cyan"
+                stages={[
+                  "Parcours de /Applications et ~/Applications...",
+                  "Extraction des architectures (Apple Silicon / Intel)...",
+                  "Calcul de la taille des bundles et binaires...",
+                ]}
+              />
             </div>
           ) : filteredApps.length === 0 ? (
             <div className="py-16 text-center text-xs text-[#787774]">
@@ -365,12 +375,16 @@ export default function UninstallerView({
       {/* ================= RIGHT COLUMN: APP INSPECTOR / RESIDUALS CLEANER ================= */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#191919]">
         {isLoadingDetails ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3">
-            <RefreshCw className="w-6 h-6 text-[#06B6D4] animate-spin" />
-            <p className="text-xs text-[#787774]">
-              Analyse des résidus dans ~/Library…
-            </p>
-          </div>
+          <ScanningRadar
+            icon={<Layers className="w-8 h-8 text-[#06B6D4]" />}
+            title="Cartographie des residus associes..."
+            color="cyan"
+            stages={[
+              "Exploration de ~/Library/Application Support...",
+              "Detection des conteneurs sandbox et preferences...",
+              "Identification des caches et rapports de plantage...",
+            ]}
+          />
         ) : !appDetails ? (
           <div className="flex-1 flex items-center justify-center p-8 text-center text-xs text-[#787774]">
             Sélectionnez une application à gauche pour inspecter son empreinte et ses résidus.

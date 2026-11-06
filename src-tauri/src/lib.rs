@@ -457,12 +457,16 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn scan_system_ghost_cmd() -> Result<SystemGhostReport, String> {
-    scan_system_ghost_cleaner()
+    tokio::task::spawn_blocking(scan_system_ghost_cleaner)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 async fn purge_system_ghost_cmd(ids: Vec<String>) -> Result<SystemGhostPurgeReport, String> {
-    purge_system_ghost_items(ids)
+    tokio::task::spawn_blocking(move || purge_system_ghost_items(ids))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
