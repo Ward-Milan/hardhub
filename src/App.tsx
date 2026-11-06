@@ -136,7 +136,6 @@ export default function App() {
         }
         return list;
       });
-      invoke("refresh_tray_menu_cmd").catch(() => {});
     } catch (err) {
       if (!silent) setErrorBanner(String(err));
     } finally {

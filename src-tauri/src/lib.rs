@@ -10,7 +10,6 @@ pub mod snapshots;
 pub mod ssd_health;
 pub mod system_cleaner;
 pub mod tools;
-pub mod tray;
 pub mod uninstaller;
 pub mod updater;
 
@@ -477,20 +476,11 @@ async fn encrypt_external_volume_cmd(
     encrypt_apfs_volume(&bsd_name, &passphrase)
 }
 
-#[tauri::command]
-fn refresh_tray_menu_cmd(app: tauri::AppHandle) -> Result<(), String> {
-    tray::refresh_tray(&app).map_err(|e| e.to_string())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            let _ = tray::setup_tray(app.handle());
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             get_storage_drives,
             get_quick_scan_presets,
@@ -530,7 +520,6 @@ pub fn run() {
             scan_system_ghost_cmd,
             purge_system_ghost_cmd,
             encrypt_external_volume_cmd,
-            refresh_tray_menu_cmd,
             updater::check_for_updates,
             updater::install_update,
         ])
