@@ -1,33 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#222222"/>
-      <stop offset="100%" stop-color="#141414"/>
+    <linearGradient id="hh-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#21201D" />
+      <stop offset="100%" stop-color="#141311" />
     </linearGradient>
-    <linearGradient id="ringBlue" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#60A5FA"/>
+    <linearGradient id="hh-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.45" />
+      <stop offset="50%" stop-color="#10B981" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0.2" />
     </linearGradient>
-    <linearGradient id="ringEmerald" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#10B981"/>
-      <stop offset="100%" stop-color="#34D399"/>
+    <linearGradient id="hh-front-ssd" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#323235" />
+      <stop offset="100%" stop-color="#1C1C1E" />
     </linearGradient>
-    <linearGradient id="ringAmber" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#F59E0B"/>
-      <stop offset="100%" stop-color="#FBBF24"/>
-    </linearGradient>
+    <filter id="hh-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="-10" dy="16" stdDeviation="18" flood-color="#000000" flood-opacity="0.7" />
+    </filter>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="210" fill="url(#bgGrad)" stroke="#333333" stroke-width="16"/>
-  <!-- Outer Sunburst / Hub Arcs -->
-  <circle cx="512" cy="512" r="310" fill="none" stroke="#282828" stroke-width="56"/>
-  <path d="M 512 202 A 310 310 0 0 1 822 512" fill="none" stroke="url(#ringEmerald)" stroke-width="56" stroke-linecap="round"/>
-  <path d="M 822 512 A 310 310 0 0 1 310 747" fill="none" stroke="url(#ringBlue)" stroke-width="56" stroke-linecap="round"/>
-  <path d="M 225 395 A 310 310 0 0 1 420 216" fill="none" stroke="url(#ringAmber)" stroke-width="56" stroke-linecap="round"/>
-  <!-- Inner Ring -->
-  <circle cx="512" cy="512" r="200" fill="none" stroke="#2A2A2A" stroke-width="38"/>
-  <path d="M 512 312 A 200 200 0 1 1 325 582" fill="none" stroke="#3B82F6" stroke-opacity="0.85" stroke-width="38" stroke-linecap="round"/>
-  <!-- Center Core Hub -->
-  <circle cx="512" cy="512" r="96" fill="#1C1C1C" stroke="#3E3E3E" stroke-width="12"/>
-  <circle cx="512" cy="512" r="36" fill="#10B981"/>
-</svg>
 
+  <!-- Squircle Background Canvas -->
+  <rect width="1024" height="1024" rx="230" fill="url(#hh-bg)" />
+  <rect x="16" y="16" width="992" height="992" rx="214" fill="none" stroke="url(#hh-rim)" stroke-width="4" />
+
+  <!-- Back Storage Plate (Exact Hard Suite Dual-Plate Spec) -->
+  <rect x="290" y="210" width="530" height="420" rx="70" fill="#242426" stroke="#3A3A3D" stroke-width="8" />
+  <circle cx="755" cy="275" r="14" fill="#10B981" />
+
+  <!-- Front Storage Plate (Exact Hard Suite Dual-Plate Spec) -->
+  <rect x="200" y="380" width="530" height="420" rx="70" fill="url(#hh-front-ssd)" stroke="#454549" stroke-width="8" filter="url(#hh-shadow)" />
+  <circle cx="265" cy="445" r="12" fill="#3B82F6" />
+
+  <!-- Space Lens Donut Chart (Left) -->
+  <path d="M 380 485 A 110 110 0 0 1 490 595 L 435 595 A 55 55 0 0 0 380 540 Z" fill="#10B981" />
+  <path d="M 490 610 A 110 110 0 0 1 280 650 L 328 622 A 55 55 0 0 0 435 610 Z" fill="#3B82F6" />
+  <path d="M 273 632 A 110 110 0 0 1 365 485 L 365 540 A 55 55 0 0 0 322 612 Z" fill="#F59E0B" />
+
+  <!-- Storage Capacity Bars (Right) -->
+  <rect x="525" y="515" width="145" height="24" rx="8" fill="#141416" />
+  <rect x="525" y="515" width="110" height="24" rx="8" fill="#3B82F6" />
+  <rect x="525" y="565" width="145" height="24" rx="8" fill="#141416" />
+  <rect x="525" y="565" width="85" height="24" rx="8" fill="#10B981" />
+  <rect x="525" y="615" width="145" height="24" rx="8" fill="#141416" />
+  <rect x="525" y="615" width="55" height="24" rx="8" fill="#F59E0B" />
+</svg>

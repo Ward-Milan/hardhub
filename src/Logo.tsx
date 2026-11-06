@@ -1,37 +1,97 @@
 export function HardHubLogo({ className = "w-7 h-7" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" fill="none" className={className}>
+    <svg
+      viewBox="0 0 1024 1024"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <defs>
+        <linearGradient id="hh-bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#21201D" />
+          <stop offset="100%" stopColor="#141311" />
+        </linearGradient>
+        <linearGradient id="hh-rim" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.45" />
+          <stop offset="50%" stopColor="#10B981" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#F59E0B" stopOpacity="0.2" />
+        </linearGradient>
+        <linearGradient id="hh-front-ssd" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#323235" />
+          <stop offset="100%" stopColor="#1C1C1E" />
+        </linearGradient>
+        <filter id="hh-shadow" x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow
+            dx="-10"
+            dy="16"
+            stdDeviation="18"
+            floodColor="#000000"
+            floodOpacity="0.7"
+          />
+        </filter>
+      </defs>
+
+      {/* Squircle Background Canvas */}
+      <rect width="1024" height="1024" rx="230" fill="url(#hh-bg)" />
       <rect
-        x="4"
-        y="4"
-        width="56"
-        height="56"
-        rx="14"
-        fill="#202020"
-        stroke="#333333"
-        strokeWidth="2"
+        x="16"
+        y="16"
+        width="992"
+        height="992"
+        rx="214"
+        fill="none"
+        stroke="url(#hh-rim)"
+        strokeWidth="4"
       />
-      <circle cx="32" cy="32" r="19" stroke="#2A2A2A" strokeWidth="4.5" />
+
+      {/* Back Storage Plate (Exact Hard Suite Dual-Plate Spec) */}
+      <rect
+        x="290"
+        y="210"
+        width="530"
+        height="420"
+        rx="70"
+        fill="#242426"
+        stroke="#3A3A3D"
+        strokeWidth="8"
+      />
+      <circle cx="755" cy="275" r="14" fill="#10B981" />
+
+      {/* Front Storage Plate (Exact Hard Suite Dual-Plate Spec) */}
+      <rect
+        x="200"
+        y="380"
+        width="530"
+        height="420"
+        rx="70"
+        fill="url(#hh-front-ssd)"
+        stroke="#454549"
+        strokeWidth="8"
+        filter="url(#hh-shadow)"
+      />
+      <circle cx="265" cy="445" r="12" fill="#3B82F6" />
+
+      {/* Space Lens Donut Chart (Left) */}
       <path
-        d="M32 13A19 19 0 0 1 51 32"
-        stroke="#10B981"
-        strokeWidth="4.5"
-        strokeLinecap="round"
+        d="M 380 485 A 110 110 0 0 1 490 595 L 435 595 A 55 55 0 0 0 380 540 Z"
+        fill="#10B981"
       />
       <path
-        d="M51 32A19 19 0 0 1 19.5 46.3"
-        stroke="#3B82F6"
-        strokeWidth="4.5"
-        strokeLinecap="round"
+        d="M 490 610 A 110 110 0 0 1 280 650 L 328 622 A 55 55 0 0 0 435 610 Z"
+        fill="#3B82F6"
       />
       <path
-        d="M14.4 24.8A19 19 0 0 1 26.3 13.9"
-        stroke="#F59E0B"
-        strokeWidth="4.5"
-        strokeLinecap="round"
+        d="M 273 632 A 110 110 0 0 1 365 485 L 365 540 A 55 55 0 0 0 322 612 Z"
+        fill="#F59E0B"
       />
-      <circle cx="32" cy="32" r="11.5" stroke="#3B82F6" strokeOpacity="0.65" strokeWidth="3" />
-      <circle cx="32" cy="32" r="4.5" fill="#10B981" />
+
+      {/* Storage Capacity Bars (Right) */}
+      <rect x="525" y="515" width="145" height="24" rx="8" fill="#141416" />
+      <rect x="525" y="515" width="110" height="24" rx="8" fill="#3B82F6" />
+      <rect x="525" y="565" width="145" height="24" rx="8" fill="#141416" />
+      <rect x="525" y="565" width="85" height="24" rx="8" fill="#10B981" />
+      <rect x="525" y="615" width="145" height="24" rx="8" fill="#141416" />
+      <rect x="525" y="615" width="55" height="24" rx="8" fill="#F59E0B" />
     </svg>
   );
 }
@@ -117,4 +177,3 @@ export function EjectSvgIcon({ className = "w-3.5 h-3.5" }: { className?: string
     </svg>
   );
 }
-
