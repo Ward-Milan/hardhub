@@ -26,6 +26,8 @@ import {
   Sparkles,
   Activity,
   Layers,
+  Shield,
+  Info,
 } from "lucide-react";
 import {
   HardHubLogo,
@@ -98,6 +100,9 @@ export default function App() {
   >([]);
   const [isCheckingBlockers, setIsCheckingBlockers] = useState(false);
   const [isEjecting, setIsEjecting] = useState<string | null>(null);
+
+  // Disclaimer Modal State
+  const [isDisclaimerOpen, setIsDisclaimerOpen] = useState(false);
 
   // External Drive Encryption Modal State
   const [encryptTargetDrive, setEncryptTargetDrive] =
@@ -608,10 +613,17 @@ export default function App() {
             </button>
           </div>
 
-          <div className="px-3 py-2 rounded-lg bg-[#191919] border border-[#252525] flex items-center justify-between text-[11px] text-[#787774]">
-            <span>Hard Suite • v1.0</span>
+          <button
+            onClick={() => setIsDisclaimerOpen(true)}
+            className="w-full px-3 py-2 rounded-lg bg-[#191919] hover:bg-[#222222] border border-[#252525] hover:border-[#333333] flex items-center justify-between text-[11px] text-[#787774] hover:text-[#EDEDEC] transition-all cursor-pointer text-left"
+            title="Informations legales et conditions d'utilisation"
+          >
+            <div className="flex items-center gap-2">
+              <Shield className="w-3.5 h-3.5 text-[#787774]" />
+              <span>Hard Suite • v1.0</span>
+            </div>
             <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
-          </div>
+          </button>
         </aside>
 
         {/* MAIN CONTENT */}
@@ -1058,6 +1070,67 @@ export default function App() {
                     <span>Mettre à jour</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ================= DISCLAIMER MODAL ================= */}
+      {isDisclaimerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#202020] border border-[#2F2F2F] rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#2C2C2C] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Shield className="w-5 h-5 text-[#3B82F6]" />
+                <h3 className="text-sm font-semibold text-[#EDEDEC]">
+                  Conditions d'utilisation &amp; Mentions Légales
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsDisclaimerOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-[#2A2A2A] text-[#9B9A97] hover:text-[#EDEDEC] transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 text-xs text-[#9B9A97] leading-relaxed">
+              <div className="p-3.5 rounded-xl bg-[#282828] border border-[#353535] space-y-1.5">
+                <p className="font-semibold text-[#EDEDEC] flex items-center gap-2">
+                  <Info className="w-4 h-4 text-[#3B82F6]" />
+                  Logiciel Local &amp; Respect de la Confidentialité
+                </p>
+                <p>
+                  HardHub et l'ensemble de la Hard Suite fonctionnent de manière 100% autonome et hors-ligne sur votre machine. Aucune donnée personnelle, statistique d'usage ou télémétrie n'est transmise à un serveur tiers.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold text-[#EDEDEC]">Responsabilité de l'utilisateur</h4>
+                <p>
+                  Les outils proposés par Hard Suite (manipulation de systèmes de fichiers, éjection forcée, formatage, nettoyage de caches et récupération de données) interagissent directement avec vos périphériques de stockage.
+                </p>
+                <p>
+                  L'utilisateur demeure seul responsable des actions menées sur ses supports. Il est vivement conseillé de maintenir des sauvegardes vérifiées et à jour avant toute opération de maintenance ou de reformatage de disque.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-lg bg-[#191919] border border-[#2C2C2C] space-y-1 font-mono text-[11px] text-[#787774]">
+                <p className="text-[#9B9A97] font-sans font-semibold">Licence MIT — Clause de non-garantie</p>
+                <p>
+                  LE LOGICIEL EST FOURNI « TEL QUEL », SANS AUCUNE GARANTIE D'AUCUNE SORTE, EXPRESSE OU IMPLICITE, Y COMPRIS MAIS NON LIMITÉ AUX GARANTIES DE QUALITÉ MARCHANDE OU D'ADÉQUATION À UN USAGE PARTICULIER.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-6 py-3.5 bg-[#191919] border-t border-[#2C2C2C] flex items-center justify-between text-xs">
+              <span className="text-[#787774]">Hard Suite v1.0 • Open Source</span>
+              <button
+                type="button"
+                onClick={() => setIsDisclaimerOpen(false)}
+                className="px-4 py-1.5 rounded-lg text-xs font-medium bg-[#EDEDEC] text-[#191919] hover:bg-white transition-colors cursor-pointer"
+              >
+                Compris
               </button>
             </div>
           </div>

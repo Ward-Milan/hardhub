@@ -1,7 +1,7 @@
 {
   "name": "hardhub",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "macOS Storage Control Center — Space Lens, Offline Drive Vault, Safe Force Eject & Link Inspector",
   "type": "module",
   "scripts": {
@@ -32,4 +32,3 @@
     "vite": "^6.0.3"
   }
 }
-
