@@ -85,11 +85,9 @@ Le package d'installation autonome macOS (Apple Silicon) est disponible :
 ### Installation sur macOS
 1. Téléchargez et ouvrez **`HardHub_1.0.0_macOS.dmg`**.
 2. Glissez-déposez **HardHub.app** dans votre dossier **/Applications**.
-3. *Note Gatekeeper (macOS Sequoia / Tahoe)* : L'application étant open-source et signée ad-hoc sans certificat commercial, si macOS affiche un avertissement au premier lancement, exécutez dans le Terminal :
-   ```bash
-   xattr -cr /Applications/HardHub.app
-   ```
-   (ou autorisez l'application dans *Réglages Système > Confidentialité et sécurité > Ouvrir quand même*).
+3. **Premier lancement (sécurité macOS / Gatekeeper)** : L'application étant open-source et gratuite (sans abonnement payant Apple Developer), macOS peut bloquer sa première ouverture. Pour l'autoriser :
+   - Lancez l'app une première fois, puis allez dans **Réglages Système › Confidentialité et sécurité**, descendez tout en bas et cliquez sur **« Ouvrir quand même »**.
+   - *(En cas de blocage persistant sur macOS Sequoia+, vous pouvez aussi lancer dans le Terminal : `xattr -cr /Applications/HardHub.app`).*
 
 ---
 
