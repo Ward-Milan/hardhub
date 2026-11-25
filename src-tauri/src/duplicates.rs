@@ -1,14 +1,20 @@
-use crate::space_lens::is_protected_system_path;
+use crate::space_lens::{is_system_or_bundle_artifact, is_unsafe_for_generic_cleanup};
 use image::imageops::FilterType;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 use walkdir::WalkDir;
 use xxhash_rust::xxh3::Xxh3;
+
+const MAX_WALKED_ENTRIES: usize = 250_000;
+const MAX_CANDIDATE_FILES: usize = 60_000;
+const MAX_RETURNED_GROUPS: usize = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +48,8 @@ pub struct DuplicateScanReport {
     pub total_wasted_bytes: u64,
     pub total_duplicate_files: usize,
     pub scan_duration_ms: u64,
+    pub truncated: bool,
+    pub skipped_protected_count: usize,
     pub groups: Vec<DuplicateGroup>,
 }
 
@@ -131,47 +139,75 @@ pub fn scan_duplicates(
     min_size_bytes: u64,
 ) -> Result<DuplicateScanReport, String> {
     let start = Instant::now();
-    let root = Path::new(target_path);
+    let resolved_target = if target_path == "/" {
+        std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string())
+    } else {
+        target_path.to_string()
+    };
+
+    let root = Path::new(&resolved_target);
     if !root.exists() {
-        return Err(format!("Le dossier cible '{}' est introuvable.", target_path));
+        return Err(format!("Le dossier cible '{}' est introuvable.", resolved_target));
     }
 
-    // Step 1: Collect all files and filter by minimum size
-    let mut file_candidates: Vec<(PathBuf, u64, u64)> = Vec::new(); // (path, size, modified_ts)
-    let min_sz = min_size_bytes.max(1024); // ignore 0-byte or tiny metadata files
+    let mut file_candidates: Vec<(PathBuf, u64, u64)> = Vec::new();
+    let min_sz = min_size_bytes.max(1024);
+    let skipped_protected = Cell::new(0usize);
+    let mut truncated = false;
+    let mut walked_entries = 0usize;
 
     for entry in WalkDir::new(root)
+        .follow_links(false)
         .min_depth(1)
-        .max_depth(12)
+        .max_depth(10)
         .into_iter()
         .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.file_type().is_symlink() {
+                return false;
+            }
             let name = e.file_name().to_string_lossy();
-            name != ".DS_Store"
-                && !name.starts_with("._")
-                && name != ".Spotlight-V100"
-                && name != ".fseventsd"
-                && name != ".Trashes"
-                && name != ".Trash"
-                && name != "node_modules"
-                && name != ".git"
+            if name.starts_with('.') {
+                return false;
+            }
+            if is_system_or_bundle_artifact(e.path()) {
+                skipped_protected.set(skipped_protected.get() + 1);
+                return false;
+            }
+            true
         })
         .flatten()
     {
-        if entry.file_type().is_file() {
-            if let Ok(meta) = entry.metadata() {
-                let sz = meta.len();
-                if sz >= min_sz {
-                    let ts = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    file_candidates.push((entry.path().to_path_buf(), sz, ts));
-                }
+        walked_entries += 1;
+        if walked_entries > MAX_WALKED_ENTRIES || file_candidates.len() >= MAX_CANDIDATE_FILES {
+            truncated = true;
+            break;
+        }
+        let ft = entry.file_type();
+        if ft.is_symlink() || !ft.is_file() {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            let sz = meta.len();
+            // Skip cloud-evicted (dataless) files so hashing does not stall on downloads.
+            if meta.blocks() == 0 && sz > 0 {
+                continue;
+            }
+            if sz >= min_sz {
+                let ts = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                file_candidates.push((entry.path().to_path_buf(), sz, ts));
             }
         }
     }
+
+    let skipped_protected_count = skipped_protected.get();
 
     let total_scanned_files = file_candidates.len();
 
@@ -238,7 +274,7 @@ pub fn scan_duplicates(
                                 parent_dir: parent,
                                 size_bytes: *sz,
                                 modified_ts: ts,
-                                is_marked_for_deletion: !is_original,
+                                is_marked_for_deletion: false,
                                 is_suggested_original: is_original,
                             });
                         }
@@ -358,7 +394,7 @@ pub fn scan_duplicates(
                             parent_dir: parent,
                             size_bytes: sz,
                             modified_ts: ts,
-                            is_marked_for_deletion: !is_original,
+                            is_marked_for_deletion: false,
                             is_suggested_original: is_original,
                         });
                     }
@@ -376,8 +412,11 @@ pub fn scan_duplicates(
         }
     }
 
-    // Sort groups by wasted space descending (most reclaimable space first)
     duplicate_groups.sort_by(|a, b| b.wasted_bytes.cmp(&a.wasted_bytes));
+    if duplicate_groups.len() > MAX_RETURNED_GROUPS {
+        duplicate_groups.truncate(MAX_RETURNED_GROUPS);
+        truncated = true;
+    }
 
     let total_wasted_bytes: u64 = duplicate_groups.iter().map(|g| g.wasted_bytes).sum();
     let total_duplicate_files: usize = duplicate_groups
@@ -386,12 +425,14 @@ pub fn scan_duplicates(
         .sum();
 
     Ok(DuplicateScanReport {
-        target_path: target_path.to_string(),
+        target_path: resolved_target,
         total_scanned_files,
         total_duplicate_groups: duplicate_groups.len(),
         total_wasted_bytes,
         total_duplicate_files,
         scan_duration_ms: start.elapsed().as_millis() as u64,
+        truncated,
+        skipped_protected_count,
         groups: duplicate_groups,
     })
 }
@@ -410,9 +451,9 @@ pub fn purge_duplicates_files(
             continue;
         }
 
-        if is_protected_system_path(path) {
+        if is_unsafe_for_generic_cleanup(path) {
             errors.push(format!(
-                "Suppression refusée par sécurité sur le fichier protégé : {}",
+                "Suppression refusée par sécurité sur le fichier système ou protégé : {}",
                 p_str
             ));
             continue;
@@ -421,10 +462,9 @@ pub fn purge_duplicates_files(
         let sz = fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0);
 
         let res = if move_to_trash {
-            // Move file to appropriate .Trash folder
-            move_file_to_trash(path)
+            crate::drives::move_path_to_macos_trash(path)
         } else {
-            fs::remove_file(path)
+            fs::remove_file(path).map_err(|e| e.to_string())
         };
 
         match res {
@@ -443,48 +483,4 @@ pub fn purge_duplicates_files(
         freed_bytes,
         errors,
     }
-}
-
-fn move_file_to_trash(path: &Path) -> std::io::Result<()> {
-    // If inside user home or external volume, locate .Trash
-    let trash_dir = if let Ok(home) = std::env::var("HOME") {
-        if path.starts_with(&home) {
-            PathBuf::from(home).join(".Trash")
-        } else {
-            // Check for volume root
-            path.ancestors()
-                .find(|a| a.parent() == Some(Path::new("/Volumes")))
-                .map(|vol| vol.join(".Trashes"))
-                .unwrap_or_else(|| PathBuf::from(&home).join(".Trash"))
-        }
-    } else {
-        return fs::remove_file(path);
-    };
-
-    if !trash_dir.exists() {
-        let _ = fs::create_dir_all(&trash_dir);
-    }
-
-    let file_name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let mut dest = trash_dir.join(&file_name);
-    if dest.exists() {
-        let unique_name = format!("{}_{}", Local_now_stamp(), file_name);
-        dest = trash_dir.join(unique_name);
-    }
-
-    // Try fs::rename first, fallback to copy+delete if crossing filesystems
-    if fs::rename(path, &dest).is_err() {
-        fs::copy(path, &dest)?;
-        fs::remove_file(path)?;
-    }
-    Ok(())
-}
-
-#[allow(non_snake_case)]
-fn Local_now_stamp() -> String {
-    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
 }

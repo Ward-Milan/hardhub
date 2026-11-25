@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  AlertTriangle,
   Copy,
   Camera,
   FolderOpen,
@@ -13,10 +14,7 @@ import {
   ExternalLink,
   ShieldAlert,
   HardDrive,
-  Sparkles,
   X,
-  File,
-  Image as ImageIcon,
 } from "lucide-react";
 import type {
   DuplicateGroup,
@@ -62,13 +60,20 @@ export default function DuplicatesView({
     "all"
   );
 
-  // Group state with mutable selection
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
   const [moveToTrash, setMoveToTrash] = useState<boolean>(true);
   const [confirmPurgeModal, setConfirmPurgeModal] = useState<boolean>(false);
+  const [confirmIrreversible, setConfirmIrreversible] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
 
   const activeTargetPath = customFolderPath || selectedMountPoint;
+  const activeTargetLabel =
+    activeTargetPath === "/" ? "Dossier Utilisateur (~)" : activeTargetPath;
+
+  const resetResults = () => {
+    setReport(null);
+    setGroups([]);
+  };
 
   const handleStartScan = async () => {
     setIsScanning(true);
@@ -87,10 +92,6 @@ export default function DuplicatesView({
     }
   };
 
-  useEffect(() => {
-    handleStartScan();
-  }, [activeTargetPath, includeSimilarPhotos, minSizePreset]);
-
   const handlePickCustomFolder = async () => {
     try {
       const selected = await open({
@@ -100,6 +101,7 @@ export default function DuplicatesView({
       });
       if (typeof selected === "string" && selected) {
         setCustomFolderPath(selected);
+        resetResults();
       }
     } catch (err) {
       onShowError(String(err));
@@ -172,10 +174,25 @@ export default function DuplicatesView({
     return list;
   }, [groups]);
 
+  const groupsWithAllSelectedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of groups) {
+      if (g.files.length > 0 && g.files.every((f) => f.isMarkedForDeletion)) {
+        ids.add(g.groupId);
+      }
+    }
+    return ids;
+  }, [groups]);
+
   const totalSelectedBytes = useMemo(
     () => selectedForDeletion.reduce((acc, f) => acc + f.sizeBytes, 0),
     [selectedForDeletion]
   );
+
+  const openConfirmPurgeModal = () => {
+    setConfirmIrreversible(false);
+    setConfirmPurgeModal(true);
+  };
 
   const handleExecutePurge = async () => {
     if (selectedForDeletion.length === 0) return;
@@ -217,7 +234,7 @@ export default function DuplicatesView({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#191919]">
-      {/* ================= TOP TARGET BAR ================= */}
+      {/* TOP TARGET BAR */}
       <div className="px-5 py-3 border-b border-[#2A2A2A] bg-[#161616] flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex flex-wrap items-center gap-2">
           {/* Drives Quick Buttons */}
@@ -232,6 +249,7 @@ export default function DuplicatesView({
                   onClick={() => {
                     setCustomFolderPath(null);
                     setSelectedMountPoint(d.mountPoint);
+                    resetResults();
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 border transition-colors cursor-pointer ${
                     isSelected
@@ -241,7 +259,7 @@ export default function DuplicatesView({
                 >
                   <HardDrive className="w-3.5 h-3.5" />
                   <span>
-                    {d.mountPoint === "/" ? `${d.name} (~)` : d.name}
+                    {d.mountPoint === "/" ? "Dossier Utilisateur (~)" : d.name}
                   </span>
                 </button>
               );
@@ -271,7 +289,10 @@ export default function DuplicatesView({
             <input
               type="checkbox"
               checked={includeSimilarPhotos}
-              onChange={(e) => setIncludeSimilarPhotos(e.target.checked)}
+              onChange={(e) => {
+                setIncludeSimilarPhotos(e.target.checked);
+                resetResults();
+              }}
               className="accent-[#EF4444] rounded"
             />
             <span className="flex items-center gap-1">
@@ -282,7 +303,10 @@ export default function DuplicatesView({
 
           <select
             value={minSizePreset}
-            onChange={(e) => setMinSizePreset(Number(e.target.value))}
+            onChange={(e) => {
+              setMinSizePreset(Number(e.target.value));
+              resetResults();
+            }}
             className="px-2.5 py-1 rounded-lg bg-[#202020] border border-[#303030] text-xs text-[#EDEDEC] focus:outline-none"
           >
             <option value={1024 * 512}>Taille &gt; 500 Ko</option>
@@ -294,19 +318,17 @@ export default function DuplicatesView({
           <button
             onClick={handleStartScan}
             disabled={isScanning}
-            className="px-3 py-1.5 rounded-xl bg-[#262626] hover:bg-[#303030] border border-[#383838] text-xs font-medium text-[#EDEDEC] flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-1.5 rounded-xl bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-50 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 ${
-                isScanning ? "animate-spin text-[#EF4444]" : ""
-              }`}
+              className={`w-3.5 h-3.5 ${isScanning ? "animate-spin" : ""}`}
             />
-            <span>Réanalyser</span>
+            <span>{isScanning ? "Analyse…" : report ? "Réanalyser" : "Lancer l'analyse"}</span>
           </button>
         </div>
       </div>
 
-      {/* ================= REPORT STATS & FILTER BAR ================= */}
+      {/* REPORT STATS & FILTER BAR */}
       {report && (
         <div className="px-5 py-2.5 border-b border-[#242424] bg-[#181818] flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 text-xs">
@@ -396,13 +418,23 @@ export default function DuplicatesView({
         </div>
       </div>
 
-      {/* ================= MAIN DUPLICATE GROUPS LIST ================= */}
+      {/* TRUNCATION WARNING */}
+      {report?.truncated && (
+        <div className="mx-5 mt-3 px-4 py-2.5 rounded-xl bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-xs text-[#FCD34D] flex items-center gap-2.5 shrink-0">
+          <AlertTriangle className="w-4 h-4 text-[#F59E0B] shrink-0" />
+          <span>
+            Analyse plafonnée pour préserver les performances : affichage des 300 groupes les plus volumineux. Sélectionnez un dossier précis pour un scan complet.
+          </span>
+        </div>
+      )}
+
+      {/* MAIN DUPLICATE GROUPS LIST */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {isScanning ? (
           <ScanningRadar
             icon={<Copy className="w-8 h-8 text-[#F59E0B]" />}
             title="Détection des doublons &amp; photos similaires…"
-            subtitle={selectedMountPoint ? `Analyse sur : ${selectedMountPoint}` : undefined}
+            subtitle={`Analyse sur : ${activeTargetLabel}`}
             color="amber"
             stages={[
               "Filtrage ultra-rapide par taille de fichiers...",
@@ -411,6 +443,53 @@ export default function DuplicatesView({
               "Regroupement et calcul des gigaoctets gaspillés...",
             ]}
           />
+        ) : !report ? (
+          <div className="max-w-xl mx-auto my-10 bg-[#202020] border border-[#2F2F2F] rounded-2xl p-6 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#F59E0B]/15 border border-[#F59E0B]/30 flex items-center justify-center shrink-0">
+                <Copy className="w-5 h-5 text-[#F59E0B]" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-[#EDEDEC]">
+                  Recherche de doublons manuelle et sécurisée
+                </h3>
+                <p className="text-xs text-[#9B9A97] mt-1">
+                  Cible sélectionnée :{" "}
+                  <span className="font-mono text-[#EDEDEC]">{activeTargetLabel}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#161616] border border-[#2C2C2C] flex items-start gap-2.5 text-xs text-[#9B9A97]">
+              <ShieldAlert className="w-4 h-4 text-[#10B981] shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-[#EDEDEC] font-medium">
+                  Protection macOS active — Aucun fichier sélectionné par défaut
+                </p>
+                <p className="text-[11px] leading-relaxed">
+                  Les fichiers système macOS, <span className="font-mono">~/Library</span>, les paquets{" "}
+                  <span className="font-mono">.app</span>, photothèques et fichiers iCloud évincés sont automatiquement exclus. Par défaut, les suppressions passent par la Corbeille ; la suppression définitive est irréversible.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              <button
+                onClick={handleStartScan}
+                className="px-4 py-2.5 rounded-xl bg-[#EF4444] hover:bg-[#DC2626] text-white font-semibold text-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Lancer la recherche de doublons</span>
+              </button>
+              <button
+                onClick={handlePickCustomFolder}
+                className="px-4 py-2.5 rounded-xl bg-[#262626] hover:bg-[#303030] border border-[#383838] text-xs font-medium text-[#EDEDEC] flex items-center gap-2 cursor-pointer"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-[#F59E0B]" />
+                <span>Choisir un dossier précis (recommandé)</span>
+              </button>
+            </div>
+          </div>
         ) : filteredGroups.length === 0 ? (
           <div className="py-20 text-center space-y-2">
             <div className="w-10 h-10 rounded-2xl bg-[#10B981]/15 border border-[#10B981]/30 flex items-center justify-center mx-auto">
@@ -426,14 +505,17 @@ export default function DuplicatesView({
         ) : (
           filteredGroups.map((group) => {
             const isExact = group.matchType === "exact";
+            const allInGroupSelected = groupsWithAllSelectedIds.has(group.groupId);
             return (
               <div
                 key={group.groupId}
-                className="bg-[#202020] border border-[#2D2D2D] rounded-2xl overflow-hidden"
+                className={`bg-[#202020] border rounded-2xl overflow-hidden ${
+                  allInGroupSelected ? "border-[#F59E0B]/60" : "border-[#2D2D2D]"
+                }`}
               >
                 {/* Group Header */}
-                <div className="px-4 py-2.5 bg-[#1B1B1B] border-b border-[#282828] flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
+                <div className="px-4 py-2.5 bg-[#1B1B1B] border-b border-[#282828] flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 ${
                         isExact
@@ -448,6 +530,13 @@ export default function DuplicatesView({
                       )}
                       <span>{group.similarityLabel}</span>
                     </span>
+
+                    {allInGroupSelected && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[#F59E0B]/15 border border-[#F59E0B]/40 text-[#FCD34D] flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 text-[#F59E0B]" />
+                        <span>Attention : tous les exemplaires sélectionnés</span>
+                      </span>
+                    )}
 
                     <span className="text-xs text-[#9B9A97]">
                       {group.files.length} fichiers • Taille :{" "}
@@ -536,7 +625,7 @@ export default function DuplicatesView({
         )}
       </div>
 
-      {/* ================= BOTTOM STICKY ACTION BAR ================= */}
+      {/* BOTTOM STICKY ACTION BAR */}
       {selectedForDeletion.length > 0 && (
         <div className="px-5 py-3 border-t border-[#382323] bg-[#1D1616] flex items-center justify-between gap-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -556,7 +645,10 @@ export default function DuplicatesView({
                 <input
                   type="checkbox"
                   checked={moveToTrash}
-                  onChange={(e) => setMoveToTrash(e.target.checked)}
+                  onChange={(e) => {
+                    setMoveToTrash(e.target.checked);
+                    setConfirmIrreversible(false);
+                  }}
                   className="accent-[#10B981] rounded"
                 />
                 <span>Déplacer dans la Corbeille (récupérable)</span>
@@ -572,7 +664,7 @@ export default function DuplicatesView({
               Annuler sélection
             </button>
             <button
-              onClick={() => setConfirmPurgeModal(true)}
+              onClick={openConfirmPurgeModal}
               className="px-4 py-1.5 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -582,10 +674,10 @@ export default function DuplicatesView({
         </div>
       )}
 
-      {/* ================= CONFIRM PURGE MODAL ================= */}
+      {/* CONFIRM PURGE MODAL */}
       {confirmPurgeModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#202020] border border-[#333333] rounded-2xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-lg bg-[#202020] border border-[#333333] rounded-2xl shadow-2xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-[#2C2C2C] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-[#EF4444]" />
@@ -602,25 +694,55 @@ export default function DuplicatesView({
             </div>
 
             <div className="p-5 space-y-4">
+              {moveToTrash ? (
+                <div className="p-3 rounded-xl bg-[#10B981]/10 border border-[#10B981]/30 text-xs text-[#34D399] flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <span>
+                    Déplacement vers la Corbeille macOS — fichiers récupérables ultérieurement.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-[#EF4444]/15 border border-[#EF4444]/40 text-xs text-[#FCA5A5] space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-[#EF4444]">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>ACTION IRRÉVERSIBLE — Suppression définitive sans passer par la Corbeille</span>
+                  </div>
+                  <p className="text-[11px] text-[#FCA5A5]/90">
+                    Les fichiers supprimés définitivement ne pourront pas être restaurés depuis la Corbeille.
+                  </p>
+                </div>
+              )}
+
+              {groupsWithAllSelectedIds.size > 0 && (
+                <div className="p-3 rounded-xl bg-[#F59E0B]/15 border border-[#F59E0B]/40 text-xs text-[#FCD34D] flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-[#F59E0B] shrink-0 mt-0.5" />
+                  <span>
+                    Attention : tous les exemplaires de{" "}
+                    <strong>{groupsWithAllSelectedIds.size} groupe(s)</strong> sont sélectionnés — aucune copie ne sera conservée.
+                  </span>
+                </div>
+              )}
+
               <p className="text-xs text-[#9B9A97]">
-                Vous allez supprimer{" "}
+                Vous allez {moveToTrash ? "déplacer dans la Corbeille" : "supprimer définitivement"}{" "}
                 <strong className="text-[#EDEDEC]">
-                  {selectedForDeletion.length} doublons
+                  {selectedForDeletion.length} doublon(s)
                 </strong>{" "}
-                pour libérer immédiatement{" "}
+                pour libérer{" "}
                 <strong className="text-[#FCA5A5] font-mono">
                   {formatBytes(totalSelectedBytes)}
                 </strong>
-                . Les originaux resteront intacts.
+                .
               </p>
 
-              <div className="max-h-40 overflow-y-auto space-y-1 p-2 rounded-xl bg-[#161616] border border-[#282828]">
+              <div className="max-h-40 overflow-y-auto space-y-1 p-2.5 rounded-xl bg-[#161616] border border-[#282828]">
                 {selectedForDeletion.slice(0, 10).map((f) => (
                   <div
                     key={f.path}
                     className="text-[11px] font-mono text-[#EDEDEC] truncate"
+                    title={f.path}
                   >
-                    {f.name}
+                    {f.path}
                   </div>
                 ))}
                 {selectedForDeletion.length > 10 && (
@@ -629,6 +751,20 @@ export default function DuplicatesView({
                   </div>
                 )}
               </div>
+
+              {!moveToTrash && (
+                <label className="flex items-center gap-2 text-xs text-[#EDEDEC] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={confirmIrreversible}
+                    onChange={(e) => setConfirmIrreversible(e.target.checked)}
+                    className="accent-[#EF4444]"
+                  />
+                  <span>
+                    Je comprends que cette suppression est définitive et irréversible
+                  </span>
+                </label>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
@@ -639,8 +775,8 @@ export default function DuplicatesView({
                 </button>
                 <button
                   onClick={handleExecutePurge}
-                  disabled={isPurging}
-                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+                  disabled={isPurging || (!moveToTrash && !confirmIrreversible)}
+                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>

@@ -301,10 +301,12 @@ pub fn list_all_storage_drives() -> Vec<StorageDriveInfo> {
         let is_internal = mount_point == "/";
         let name_lower = name.to_lowercase();
         let model_lower = meta.device_model.to_lowercase();
+        let proto_lower = meta.protocol.to_lowercase();
 
         let device_type = if is_internal {
             "internal_ssd".to_string()
-        } else if model_lower.contains("sd")
+        } else if proto_lower.contains("secure digital")
+            || model_lower.contains("sd")
             || model_lower.contains("reader")
             || name_lower.contains("eos")
             || name_lower.contains("lumix")
@@ -362,5 +364,271 @@ pub fn list_all_storage_drives() -> Vec<StorageDriveInfo> {
     }
 
     results
+}
+
+/// Validates that a BSD disk identifier strictly matches `disk<N>` or `disk<N>s<M>(s<P>)`.
+pub fn is_valid_bsd_name(name: &str) -> bool {
+    let trimmed = name.trim().trim_start_matches("/dev/");
+    let Some(rest) = trimmed.strip_prefix("disk") else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    let mut parts = rest.split('s');
+    let Some(disk_num) = parts.next() else {
+        return false;
+    };
+    if disk_num.is_empty() || !disk_num.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    for slice_part in parts {
+        if slice_part.is_empty() || !slice_part.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Extracts the base whole-disk BSD identifier (e.g. `disk5` from `/dev/disk5s1` or `disk3s1s1`).
+pub fn extract_base_whole_disk(bsd_name: &str) -> String {
+    let clean = bsd_name.trim().trim_start_matches("/dev/");
+    if let Some(rest) = clean.strip_prefix("disk") {
+        let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !num.is_empty() {
+            return format!("disk{}", num);
+        }
+    }
+    clean.to_string()
+}
+
+/// Resolves a BSD identifier or mount point (including synthesized APFS volumes/containers)
+/// down to its underlying physical whole-disk BSD name (e.g. `disk3s1s1` -> `disk0`, `disk6s2` -> `disk5`).
+pub fn resolve_physical_whole_disk(bsd_or_mount: &str) -> Option<String> {
+    let mut current = bsd_or_mount.trim().to_string();
+    if current.is_empty() {
+        return None;
+    }
+
+    let mut last_valid_disk: Option<String> = None;
+    for _ in 0..3 {
+        let output = Command::new("/usr/sbin/diskutil")
+            .args(["info", &current])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            break;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut device_id: Option<String> = None;
+        let mut apfs_store: Option<String> = None;
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            let Some((k, v)) = trimmed.split_once(':') else {
+                continue;
+            };
+            let key = k.trim();
+            let val = v.trim();
+            match key {
+                "Device Identifier" => {
+                    let cand = val.trim_start_matches("/dev/").trim();
+                    if is_valid_bsd_name(cand) {
+                        device_id = Some(cand.to_string());
+                    }
+                }
+                "APFS Physical Store" => {
+                    let cand = val.trim_start_matches("/dev/").trim();
+                    if is_valid_bsd_name(cand) {
+                        apfs_store = Some(cand.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(id) = device_id {
+            last_valid_disk = Some(extract_base_whole_disk(&id));
+        }
+
+        if let Some(store) = apfs_store {
+            current = extract_base_whole_disk(&store);
+        } else {
+            break;
+        }
+    }
+
+    last_valid_disk
+}
+
+/// Evaluates raw `diskutil info` text to decide whether a device is an internal/system disk
+/// (`Ok(true)`), a safe external/removable device (`Ok(false)`), or requires recursing into an
+/// `APFS Physical Store` (`Err(store_bsd)`).
+pub fn classify_diskutil_info_internal(text: &str) -> Result<bool, String> {
+    let mut seen_external = false;
+    let mut seen_removable = false;
+    let mut protocol_lower = String::new();
+    let mut apfs_physical_store: Option<String> = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let Some((k, v)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = k.trim();
+        let val = v.trim();
+        match key {
+            "Mount Point" => {
+                if val == "/" || val.starts_with("/System") {
+                    return Ok(true);
+                }
+            }
+            "Device Location" => {
+                let lower = val.to_ascii_lowercase();
+                if lower.contains("external") {
+                    seen_external = true;
+                }
+            }
+            "Internal" => {
+                if val.eq_ignore_ascii_case("No") {
+                    seen_external = true;
+                }
+            }
+            "Removable Media" => {
+                if val.eq_ignore_ascii_case("Removable") {
+                    seen_removable = true;
+                }
+            }
+            "Protocol" => {
+                protocol_lower = val.to_ascii_lowercase();
+            }
+            "APFS Physical Store" => {
+                let candidate = val.trim_start_matches("/dev/").trim();
+                if is_valid_bsd_name(candidate) {
+                    apfs_physical_store = Some(candidate.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(store) = apfs_physical_store {
+        return Err(store);
+    }
+
+    // Built-in MacBook SDXC card readers report `Device Location: Internal` together with
+    // `Removable Media: Removable` and `Protocol: Secure Digital`. Allow those explicitly
+    // while keeping internal fixed storage (`Apple Fabric` / `PCI-Express` / `Fixed`) strictly locked.
+    let is_removable_sd_or_external_bus = seen_removable
+        && (protocol_lower.contains("secure digital")
+            || protocol_lower.contains("usb")
+            || protocol_lower.contains("thunderbolt")
+            || protocol_lower == "sd");
+
+    if seen_external || is_removable_sd_or_external_bus {
+        Ok(false)
+    } else {
+        Ok(true)
+    }
+}
+
+/// Authoritatively checks via macOS `diskutil info` whether a BSD device or mount point belongs
+/// to an internal/system disk. Fails closed (`Ok(true)`) if the device cannot be verified as external
+/// or removable SD media.
+pub fn is_bsd_disk_internal_or_system(bsd_or_mount: &str) -> Result<bool, String> {
+    let target = bsd_or_mount.trim();
+    if target.is_empty() || target == "/" || target.starts_with("/System") {
+        return Ok(true);
+    }
+
+    let query_arg = if target.starts_with("/Volumes/") {
+        target.to_string()
+    } else {
+        let stripped = target.trim_start_matches("/dev/");
+        if !is_valid_bsd_name(stripped) {
+            return Err(format!("Identifiant de disque invalide : {}", bsd_or_mount));
+        }
+        stripped.to_string()
+    };
+
+    check_diskutil_internal_recursive(&query_arg, 0)
+}
+
+fn check_diskutil_internal_recursive(target: &str, depth: u8) -> Result<bool, String> {
+    if depth > 2 {
+        return Ok(true);
+    }
+
+    let output = Command::new("/usr/sbin/diskutil")
+        .args(["info", target])
+        .output()
+        .map_err(|e| format!("Erreur d'exécution diskutil : {}", e))?;
+
+    if !output.status.success() {
+        return Ok(true);
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    match classify_diskutil_info_internal(&text) {
+        Ok(is_internal) => Ok(is_internal),
+        Err(apfs_store) => check_diskutil_internal_recursive(&apfs_store, depth + 1),
+    }
+}
+
+/// Safely moves a file or directory to the macOS Trash via Finder AppleScript `argv` passing
+/// (immune to shell/AppleScript quoting injection), with a safe same-filesystem `~/.Trash` rename fallback.
+/// Never falls back silently to permanent deletion.
+pub fn move_path_to_macos_trash(path: &Path) -> Result<(), String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "Chemin UTF-8 invalide pour la Corbeille.".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("/usr/bin/osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "tell application \"Finder\" to delete POSIX file (item 1 of argv)",
+                "-e",
+                "end run",
+                "--",
+                path_str,
+            ])
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                return Ok(());
+            }
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = Path::new(&home);
+        if path.starts_with(home_path) {
+            let trash_dir = home_path.join(".Trash");
+            if trash_dir.exists() || std::fs::create_dir_all(&trash_dir).is_ok() {
+                let fname = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or_else(|| "Nom de fichier invalide.".to_string())?;
+                let mut dest = trash_dir.join(fname);
+                if dest.exists() {
+                    let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f");
+                    dest = trash_dir.join(format!("{}_{}", stamp, fname));
+                }
+                if std::fs::rename(path, &dest).is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Impossible de déplacer '{}' vers la Corbeille sans risquer une perte définitive.",
+        path.display()
+    ))
 }
 

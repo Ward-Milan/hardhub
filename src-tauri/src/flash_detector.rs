@@ -77,13 +77,25 @@ pub fn verify_probe_block(block_idx: u32, buf: &[u8]) -> bool {
     true
 }
 
+use std::os::unix::io::AsRawFd;
+
+#[cfg(target_os = "macos")]
+fn set_fd_nocache(file: &std::fs::File) {
+    unsafe {
+        let _ = libc::fcntl(file.as_raw_fd(), libc::F_NOCACHE, 1);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_fd_nocache(_file: &std::fs::File) {}
+
 pub fn run_flash_integrity_probe(
     app: &AppHandle,
     mount_point: &str,
     target_mb: u64,
     is_removable: bool,
 ) -> Result<FlashTestResult, String> {
-    if !is_removable && mount_point == "/" {
+    if !is_removable || crate::drives::is_bsd_disk_internal_or_system(mount_point)? {
         return Err("Sécurité : le test flash est réservé aux supports externes amovibles.".to_string());
     }
 
@@ -104,59 +116,79 @@ pub fn run_flash_integrity_probe(
 
     let start_time = Instant::now();
 
-    // 1. OPEN FILE FOR DIRECT WRITING
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&probe_file_path)
-        .map_err(|e| format!("Impossible d'initialiser le fichier de test sur {}: {}", mount_point, e))?;
-
-    let mut buffer = vec![0u8; BLOCK_SIZE];
-
-    // ================= STAGE 1: WRITING =================
+    // 1. OPEN FILE FOR DIRECT PHYSICAL WRITING (F_NOCACHE)
     let write_start = Instant::now();
-    for idx in 0..total_blocks {
-        generate_probe_block(idx as u32, &mut buffer);
+    {
+        let mut write_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&probe_file_path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    format!(
+                        "Accès refusé par macOS (Permission denied / os error 13) sur '{}'. Autorisez HardHub dans Réglages Système > Confidentialité et sécurité > Fichiers et dossiers (Volumes amovibles) et Accès complet au disque, puis relancez HardHub.",
+                        mount_point
+                    )
+                } else {
+                    format!("Impossible d'initialiser le fichier de test sur {}: {}", mount_point, e)
+                }
+            })?;
+        set_fd_nocache(&write_file);
 
-        if let Err(e) = file.write_all(&buffer) {
-            let _ = fs::remove_file(&probe_file_path);
-            return Err(format!("Erreur d'écriture physique (bloc {}/{}): {}", idx, total_blocks, e));
+        let mut buffer = vec![0u8; BLOCK_SIZE];
+
+        // Stage 1: write probe file
+        for idx in 0..total_blocks {
+            generate_probe_block(idx as u32, &mut buffer);
+
+            if let Err(e) = write_file.write_all(&buffer) {
+                let _ = fs::remove_file(&probe_file_path);
+                return Err(format!("Erreur d'écriture physique (bloc {}/{}): {}", idx, total_blocks, e));
+            }
+
+            if idx % 16 == 0 || idx == total_blocks - 1 {
+                let elapsed = write_start.elapsed().as_secs_f64().max(0.001);
+                let written_mb = (idx + 1) as f64;
+                let speed = written_mb / elapsed;
+                let percent = (written_mb / (total_mb as f64) * 50.0) as f32;
+
+                let _ = app.emit("flash_test_progress", FlashTestProgress {
+                    stage: "writing".to_string(),
+                    percent,
+                    current_mb: written_mb,
+                    total_mb: total_mb as f64,
+                    speed_mbps: (speed * 10.0).round() / 10.0,
+                    message: format!("Écriture des mires de test ({} / {} Mo)…", written_mb as u64, total_mb),
+                });
+            }
         }
 
-        if idx % 16 == 0 || idx == total_blocks - 1 {
-            let elapsed = write_start.elapsed().as_secs_f64().max(0.001);
-            let written_mb = (idx + 1) as f64;
-            let speed = written_mb / elapsed;
-            let percent = (written_mb / (total_mb as f64) * 50.0) as f32;
-
-            let _ = app.emit("flash_test_progress", FlashTestProgress {
-                stage: "writing".to_string(),
-                percent,
-                current_mb: written_mb,
-                total_mb: total_mb as f64,
-                speed_mbps: (speed * 10.0).round() / 10.0,
-                message: format!("Écriture des mires de test ({} / {} Mo)…", written_mb as u64, total_mb),
-            });
-        }
+        let _ = write_file.sync_all();
     }
-
-    let _ = file.sync_all();
     let write_duration = write_start.elapsed().as_secs_f64().max(0.001);
     let write_speed_mbps = (total_mb as f64) / write_duration;
 
-    // ================= STAGE 2: SEEK TO BEGINNING & VERIFY =================
-    if let Err(e) = file.seek(SeekFrom::Start(0)) {
+    // Stage 2: reopen read-only with F_NOCACHE and verify
+    let mut read_file = OpenOptions::new()
+        .read(true)
+        .open(&probe_file_path)
+        .map_err(|e| {
+            let _ = fs::remove_file(&probe_file_path);
+            format!("Erreur de réouverture physique pour vérification : {}", e)
+        })?;
+    set_fd_nocache(&read_file);
+    if let Err(e) = read_file.seek(SeekFrom::Start(0)) {
         let _ = fs::remove_file(&probe_file_path);
         return Err(format!("Erreur de repositionnement de tête de lecture: {}", e));
     }
 
     let read_start = Instant::now();
     let mut corrupted_blocks = 0u64;
+    let mut buffer = vec![0u8; BLOCK_SIZE];
 
     for idx in 0..total_blocks {
-        if let Err(_e) = file.read_exact(&mut buffer) {
+        if let Err(_e) = read_file.read_exact(&mut buffer) {
             corrupted_blocks += (total_blocks - idx) as u64;
             break;
         }
@@ -186,7 +218,7 @@ pub fn run_flash_integrity_probe(
     let read_speed_mbps = (total_mb as f64) / read_duration;
 
     // Clean up temporary probe file immediately
-    drop(file);
+    drop(read_file);
     let _ = fs::remove_file(&probe_file_path);
 
     let total_duration = start_time.elapsed().as_secs_f64();

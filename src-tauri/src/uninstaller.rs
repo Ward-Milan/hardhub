@@ -304,13 +304,14 @@ fn collect_matching_residuals(
             };
             let f_lower = fname.to_lowercase();
 
-            let is_match = (!bundle_lower.is_empty() && f_lower.contains(bundle_lower))
-                || (!name_lower.is_empty()
-                    && (f_lower == name_lower
-                        || f_lower.starts_with(&format!("{}.", name_lower))
-                        || f_lower.starts_with(&format!("{}_", name_lower))));
+            let bundle_match = bundle_lower.len() >= 5
+                && (f_lower == bundle_lower
+                    || f_lower.starts_with(&format!("{}.", bundle_lower))
+                    || f_lower.starts_with(&format!("{}_", bundle_lower))
+                    || f_lower.starts_with(&format!("{}-", bundle_lower)));
+            let name_match = name_lower.len() >= 4 && f_lower == name_lower;
 
-            if is_match && p != app_path {
+            if (bundle_match || name_match) && p != app_path {
                 let sz = compute_path_size_fast(&p, 4);
                 let is_dir = p.is_dir();
                 items.push(AppResidualItem {
@@ -319,7 +320,7 @@ fn collect_matching_residuals(
                     category: category.to_string(),
                     size_bytes: sz,
                     is_dir,
-                    is_selected: true,
+                    is_selected: bundle_match,
                 });
             }
         }
@@ -512,12 +513,15 @@ pub fn get_app_details(app_path: &str) -> Result<AppDetails, String> {
 }
 
 pub fn quit_running_app(app_path: &str) -> Result<(), String> {
+    if app_path.trim().is_empty() || !app_path.ends_with(".app") {
+        return Err("Chemin de bundle .app invalide.".to_string());
+    }
     let sys = System::new_all();
     let mut found = false;
     for (pid, proc) in sys.processes() {
         if let Some(exe) = proc.exe().and_then(|e| e.to_str()) {
             if exe.starts_with(app_path) {
-                let _ = Command::new("kill")
+                let _ = Command::new("/bin/kill")
                     .arg("-15")
                     .arg(pid.to_string())
                     .output();
@@ -551,10 +555,6 @@ pub fn uninstall_app_items(
     // Quit if running
     let _ = quit_running_app(app_path);
 
-    let trash_dir = std::env::var("HOME")
-        .ok()
-        .map(|h| PathBuf::from(h).join(".Trash"));
-
     for item_str in paths_to_delete {
         let item_path = Path::new(item_str);
         if !item_path.exists() {
@@ -562,37 +562,19 @@ pub fn uninstall_app_items(
         }
 
         // System protection
-        if item_str.starts_with("/System") || item_str == "/Applications" || item_str == "/" {
+        if crate::space_lens::is_protected_system_path(item_path) {
             errors.push(format!("Suppression interdite sur le système : {}", item_str));
             continue;
         }
 
         let item_size = compute_path_size_fast(item_path, 4);
 
-        let res = if move_to_trash && trash_dir.is_some() {
-            let t_dir = trash_dir.as_ref().unwrap();
-            let fname = item_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let mut dest = t_dir.join(&fname);
-            if dest.exists() {
-                dest = t_dir.join(format!("{}_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"), fname));
-            }
-            if fs::rename(item_path, &dest).is_err() {
-                if item_path.is_dir() {
-                    fs::remove_dir_all(item_path)
-                } else {
-                    fs::remove_file(item_path)
-                }
-            } else {
-                Ok(())
-            }
+        let res = if move_to_trash {
+            crate::drives::move_path_to_macos_trash(item_path)
         } else if item_path.is_dir() {
-            fs::remove_dir_all(item_path)
+            fs::remove_dir_all(item_path).map_err(|e| e.to_string())
         } else {
-            fs::remove_file(item_path)
+            fs::remove_file(item_path).map_err(|e| e.to_string())
         };
 
         match res {

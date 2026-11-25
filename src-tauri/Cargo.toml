@@ -1,6 +1,6 @@
 [package]
 name = "hardhub"
-version = "1.0.1"
+version = "1.0.2"
 description = "macOS Storage Control Center — Space Lens, Offline Drive Vault, Safe Force Eject & Link Inspector"
 authors = ["Hard Suite"]
 edition = "2021"

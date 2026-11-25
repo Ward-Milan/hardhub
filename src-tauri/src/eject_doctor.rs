@@ -135,22 +135,33 @@ pub fn safe_force_eject_drive(
     }
 
     let mut killed_processes = Vec::new();
+    let mut terminated_pids: Vec<u32> = Vec::new();
 
-    // 2. If requested, terminate blocking processes before unmounting
+    // 2. If requested, terminate blocking processes cleanly before unmounting
     if kill_blockers {
         let blockers = inspect_blocking_processes(mount_point);
         for proc_info in blockers {
-            // Do not kill Finder itself, only close its hold or kill background agents/apps
+            // Do not kill Finder itself
             if proc_info.process_name.eq_ignore_ascii_case("Finder") {
                 continue;
             }
             unsafe {
                 libc::kill(proc_info.pid as i32, libc::SIGTERM);
             }
+            terminated_pids.push(proc_info.pid);
             killed_processes.push(format!("{} (PID {})", proc_info.process_name, proc_info.pid));
         }
-        if !killed_processes.is_empty() {
-            thread::sleep(Duration::from_millis(300));
+        if !terminated_pids.is_empty() {
+            // Poll up to 1500ms for applications to flush open handles cleanly
+            for _ in 0..15 {
+                let any_alive = terminated_pids.iter().any(|&pid| unsafe {
+                    libc::kill(pid as i32, 0) == 0
+                });
+                if !any_alive {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
             unsafe {
                 libc::sync();
             }
@@ -173,8 +184,22 @@ pub fn safe_force_eject_drive(
         });
     }
 
-    // 4. Fallback: if kill_blockers is enabled, try `diskutil unmount force` after sync
+    // 4. Fallback: only force-unmount if no active non-system user application is still holding files
     if kill_blockers {
+        let remaining = inspect_blocking_processes(mount_point);
+        let active_user_apps: Vec<String> = remaining
+            .iter()
+            .filter(|b| !b.is_system_agent)
+            .map(|b| format!("{} (PID {})", b.process_name, b.pid))
+            .collect();
+
+        if !active_user_apps.is_empty() {
+            return Err(format!(
+                "Démontage forcé annulé par sécurité : l'application suivante retient encore des fichiers ({}). Fermez-la pour éviter toute corruption.",
+                active_user_apps.join(", ")
+            ));
+        }
+
         unsafe {
             libc::sync();
         }

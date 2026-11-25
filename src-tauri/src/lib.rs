@@ -44,8 +44,8 @@ use system_cleaner::{
     purge_system_ghost_items, scan_system_ghost_cleaner, SystemGhostPurgeReport, SystemGhostReport,
 };
 use tools::{
-    execute_ghost_and_cache_purge, format_external_drive, run_drive_speedtest,
-    scan_ghost_and_caches, FormatDriveResult, GhostPurgeReport, GhostScanReport, SpeedTestResult,
+    execute_ghost_and_cache_purge, run_drive_speedtest, scan_ghost_and_caches, GhostPurgeReport,
+    GhostScanReport, SpeedTestResult,
 };
 use uninstaller::{
     get_app_details, quit_running_app, scan_installed_applications, uninstall_app_items,
@@ -109,10 +109,15 @@ async fn scan_space_lens_cmd(target_path: String) -> Result<SpaceLensReport, Str
 }
 
 #[tauri::command]
-async fn purge_space_collector(paths: Vec<String>) -> Result<PurgeCollectorResult, String> {
-    tokio::task::spawn_blocking(move || Ok(purge_collected_paths(&paths)))
-        .await
-        .map_err(|e| e.to_string())?
+async fn purge_space_collector(
+    paths: Vec<String>,
+    move_to_trash: Option<bool>,
+) -> Result<PurgeCollectorResult, String> {
+    tokio::task::spawn_blocking(move || {
+        Ok(purge_collected_paths(&paths, move_to_trash.unwrap_or(true)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -195,27 +200,6 @@ async fn run_hardware_speedtest(target_path: String) -> Result<SpeedTestResult, 
     tokio::task::spawn_blocking(move || run_drive_speedtest(&target_path))
         .await
         .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn format_removable_drive(
-    bsd_name: String,
-    mount_point: String,
-    is_removable: bool,
-    file_system: String,
-    new_volume_name: String,
-) -> Result<FormatDriveResult, String> {
-    tokio::task::spawn_blocking(move || {
-        format_external_drive(
-            &bsd_name,
-            &mount_point,
-            is_removable,
-            &file_system,
-            &new_volume_name,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -411,15 +395,37 @@ fn eject_all_external_drives() -> Result<Vec<EjectReport>, String> {
     Ok(reports)
 }
 
+fn resolve_safe_trash_target(mount_point: &str) -> Result<std::path::PathBuf, String> {
+    let mp = mount_point.trim();
+    if mp.is_empty()
+        || Path::new(mp)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Point de montage invalide pour le vidage de la corbeille.".to_string());
+    }
+
+    if mp == "/" {
+        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+        return Ok(Path::new(&home).join(".Trash"));
+    }
+
+    if !mp.starts_with("/Volumes/") || mp.trim_end_matches('/') == "/Volumes" {
+        return Err("Sécurité : le vidage rapide est réservé au disque principal ou aux volumes montés sous /Volumes/.".to_string());
+    }
+
+    let resolved = fs::canonicalize(mp).map_err(|_| format!("Volume introuvable : {}", mp))?;
+    let resolved_str = resolved.to_string_lossy();
+    if !resolved_str.starts_with("/Volumes/") || resolved_str.trim_end_matches('/') == "/Volumes" {
+        return Err("Sécurité : chemin de volume non autorisé.".to_string());
+    }
+
+    Ok(resolved.join(".Trashes"))
+}
+
 #[tauri::command]
 fn quick_purge_drive_trash(mount_point: String) -> Result<u64, String> {
-    let target = if mount_point == "/" {
-        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-        Path::new(&home).join(".Trash")
-    } else {
-        Path::new(&mount_point).join(".Trashes")
-    };
-
+    let target = resolve_safe_trash_target(&mount_point)?;
     if !target.exists() {
         return Ok(0);
     }
@@ -442,13 +448,34 @@ fn quick_purge_drive_trash(mount_point: String) -> Result<u64, String> {
 }
 
 #[tauri::command]
+fn open_macos_privacy_settings(pane: String) -> Result<(), String> {
+    let url = match pane.as_str() {
+        "full_disk" => "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+        "files" => "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
+        _ => return Err("Panneau de confidentialité macOS non reconnu.".to_string()),
+    };
+    Command::new("/usr/bin/open")
+        .arg(url)
+        .spawn()
+        .map_err(|e| format!("Impossible d'ouvrir Réglages Système : {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 fn reveal_in_finder(path: String) -> Result<(), String> {
-    let p = Path::new(&path);
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return Err("Chemin invalide.".to_string());
+    }
+    let p = Path::new(trimmed);
+    if !p.exists() {
+        return Err(format!("Chemin introuvable : {}", trimmed));
+    }
     let mut cmd = Command::new("/usr/bin/open");
     if p.is_file() {
-        cmd.arg("-R").arg(&path);
+        cmd.arg("-R").arg("--").arg(trimmed);
     } else {
-        cmd.arg(&path);
+        cmd.arg("--").arg(trimmed);
     }
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
@@ -473,7 +500,9 @@ async fn encrypt_external_volume_cmd(
     bsd_name: String,
     passphrase: String,
 ) -> Result<PartitionActionResult, String> {
-    encrypt_apfs_volume(&bsd_name, &passphrase)
+    tokio::task::spawn_blocking(move || encrypt_apfs_volume(&bsd_name, &passphrase))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -494,7 +523,6 @@ pub fn run() {
             scan_ghost_cleaner,
             purge_ghost_cleaner,
             run_hardware_speedtest,
-            format_removable_drive,
             scan_duplicates_cmd,
             purge_duplicates_cmd,
             list_installed_apps,
@@ -517,6 +545,7 @@ pub fn run() {
             eject_all_external_drives,
             quick_purge_drive_trash,
             reveal_in_finder,
+            open_macos_privacy_settings,
             scan_system_ghost_cmd,
             purge_system_ghost_cmd,
             encrypt_external_volume_cmd,
@@ -536,7 +565,7 @@ mod tests {
     use super::drives::evaluate_link_speed;
     use super::eject_doctor::parse_lsof_machine_output;
     use super::space_lens::{classify_file_category, is_protected_system_path, scan_space_lens};
-    use super::tools::{scan_ghost_and_caches, validate_safe_format_target};
+    use super::tools::scan_ghost_and_caches;
     use std::collections::HashMap;
     use std::path::Path;
 
@@ -635,10 +664,11 @@ mod tests {
     }
 
     #[test]
-    fn test_tools_format_guard_and_ghost_scanner() {
-        assert!(validate_safe_format_target("disk0s1", "/", false).is_err());
-        assert!(validate_safe_format_target("disk3s1", "/Volumes/Internal", true).is_err());
-        assert!(validate_safe_format_target("disk4s1", "/Volumes/T7_SSD", true).is_ok());
+    fn test_tools_ghost_scanner_and_bsd_safety() {
+        assert_eq!(super::drives::is_bsd_disk_internal_or_system("/"), Ok(true));
+        assert_eq!(super::drives::is_bsd_disk_internal_or_system("disk0s1"), Ok(true));
+        assert!(super::drives::is_bsd_disk_internal_or_system("disk4;rm").is_err());
+        assert_eq!(super::drives::is_bsd_disk_internal_or_system("disk99s1"), Ok(true));
 
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let ghost_report =
@@ -739,5 +769,186 @@ mod tests {
         assert!(super::partitioner::encrypt_apfs_volume("disk1s1", "secret123").is_err());
         // Disallow too short password
         assert!(super::partitioner::encrypt_apfs_volume("disk4s1", "12").is_err());
+        // Disallow invalid BSD names
+        assert!(super::partitioner::encrypt_apfs_volume("../disk4", "secret123").is_err());
+    }
+
+    #[test]
+    fn test_bsd_name_and_path_protection_hardening() {
+        assert!(super::drives::is_valid_bsd_name("disk4"));
+        assert!(super::drives::is_valid_bsd_name("disk12s2"));
+        assert!(super::drives::is_valid_bsd_name("/dev/disk5s1"));
+        assert!(!super::drives::is_valid_bsd_name("../disk4"));
+        assert!(!super::drives::is_valid_bsd_name("-f"));
+        assert!(!super::drives::is_valid_bsd_name("disk4;rm"));
+        assert!(!super::drives::is_valid_bsd_name(""));
+
+        assert!(is_protected_system_path(Path::new("/System")));
+        assert!(is_protected_system_path(Path::new("/Users/../System")));
+        assert!(is_protected_system_path(Path::new("/Volumes/MySSD")));
+        if let Ok(home) = std::env::var("HOME") {
+            assert!(is_protected_system_path(&Path::new(&home).join("Pictures")));
+            assert!(is_protected_system_path(&Path::new(&home).join("Movies")));
+            assert!(is_protected_system_path(&Path::new(&home).join("Downloads")));
+        }
+    }
+
+    #[test]
+    fn test_hardhub_updater_url_validation() {
+        assert!(super::updater::validate_update_url(
+            "https://github.com/Ward-Milan/hardhub/releases/download/v1.0.1/HardHub_1.0.1_aarch64.dmg"
+        )
+        .is_ok());
+        assert!(super::updater::validate_update_url("https://evil.com/HardHub.dmg").is_err());
+        assert!(super::updater::validate_update_url("-K /tmp/x").is_err());
+    }
+
+    #[test]
+    fn test_ssd_health_no_fake_temp_or_fallback() {
+        let rep = super::ssd_health::get_disk_health("disk99").expect("nonexistent disk query returns structured report");
+        assert!(rep.temperature_celsius.is_none());
+        assert_eq!(rep.bytes_written, 0);
+        assert_eq!(rep.bytes_read, 0);
+    }
+
+    #[test]
+    fn test_generic_cleanup_system_and_bundle_safety() {
+        use super::space_lens::is_unsafe_for_generic_cleanup;
+
+        assert!(is_unsafe_for_generic_cleanup(Path::new("/System/Library/CoreServices/Finder.app")));
+        assert!(is_unsafe_for_generic_cleanup(Path::new("/Library/Preferences/com.apple.plist")));
+        assert!(is_unsafe_for_generic_cleanup(Path::new("/Applications/Safari.app/Contents/Info.plist")));
+        assert!(is_unsafe_for_generic_cleanup(Path::new("/Volumes/SSD/Photos.photoslibrary/originals/a.jpg")));
+        assert!(is_unsafe_for_generic_cleanup(Path::new("/Volumes/SSD/proj/.git/config")));
+
+        if let Ok(home) = std::env::var("HOME") {
+            assert!(is_unsafe_for_generic_cleanup(
+                &Path::new(&home).join("Library/Application Support/foo.db")
+            ));
+            assert!(!is_unsafe_for_generic_cleanup(
+                &Path::new(&home).join("Desktop/test.mov")
+            ));
+        }
+
+        assert!(!is_unsafe_for_generic_cleanup(Path::new(
+            "/Volumes/SSD/Rushes/clip.mov"
+        )));
+    }
+
+    #[test]
+    fn test_duplicates_never_autoselect_and_purge_blocks_system_paths() {
+        let tmp_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("hardhub_dup_safety_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        let payload = vec![b'A'; 4096];
+        let f1 = tmp_dir.join("copy_1.bin");
+        let f2 = tmp_dir.join("copy_2.bin");
+        std::fs::write(&f1, &payload).unwrap();
+        std::fs::write(&f2, &payload).unwrap();
+
+        let rep = super::duplicates::scan_duplicates(
+            tmp_dir.to_str().unwrap(),
+            false,
+            1024,
+        )
+        .expect("duplicate scan should succeed");
+
+        assert_eq!(rep.total_duplicate_groups, 1);
+        for item in &rep.groups[0].files {
+            assert!(!item.is_marked_for_deletion);
+        }
+
+        let dup_purge = super::duplicates::purge_duplicates_files(
+            &["/System/Library/CoreServices/Finder.app".to_string()],
+            false,
+        );
+        assert_eq!(dup_purge.deleted_files_count, 0);
+
+        let large_purge = super::large_files::purge_large_files_list(
+            &["/Library/Preferences/com.apple.plist".to_string()],
+            false,
+        );
+        assert_eq!(large_purge.deleted_count, 0);
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_quick_purge_trash_rejects_unsafe_mount_points() {
+        assert!(super::resolve_safe_trash_target("/etc").is_err());
+        assert!(super::resolve_safe_trash_target("/Users").is_err());
+        assert!(super::resolve_safe_trash_target("/Volumes").is_err());
+        assert!(super::resolve_safe_trash_target("/Volumes/../etc").is_err());
+        assert!(super::resolve_safe_trash_target("").is_err());
+        assert!(super::resolve_safe_trash_target("/").is_ok());
+    }
+
+    #[test]
+    fn test_diskutil_classification_allows_builtin_sd_blocks_internal_ssd() {
+        let internal_ssd = "\
+   Device Identifier:         disk0
+   Protocol:                  Apple Fabric
+   Device Location:           Internal
+   Removable Media:           Fixed
+";
+        assert_eq!(
+            super::drives::classify_diskutil_info_internal(internal_ssd),
+            Ok(true)
+        );
+
+        let builtin_sd = "\
+   Device Identifier:         disk4
+   Device / Media Name:       Built In SDXC Reader
+   Protocol:                  Secure Digital
+   Device Location:           Internal
+   Removable Media:           Removable
+";
+        assert_eq!(
+            super::drives::classify_diskutil_info_internal(builtin_sd),
+            Ok(false)
+        );
+
+        let external_usb = "\
+   Device Identifier:         disk5
+   Protocol:                  USB
+   Device Location:           External
+   Removable Media:           Fixed
+";
+        assert_eq!(
+            super::drives::classify_diskutil_info_internal(external_usb),
+            Ok(false)
+        );
+
+        let apfs_container = "\
+   Device Identifier:         disk6
+   APFS Physical Store:       disk5s1
+";
+        assert_eq!(
+            super::drives::classify_diskutil_info_internal(apfs_container),
+            Err("disk5s1".to_string())
+        );
+
+        assert_eq!(super::drives::classify_diskutil_info_internal(""), Ok(true));
+    }
+
+    #[test]
+    fn test_ssd_health_resolves_root_apfs_to_physical_disk() {
+        let rep = super::ssd_health::get_disk_health("/")
+            .expect("S.M.A.R.T. query on root mount should resolve physical disk");
+        println!("REAL NVMe SMART REPORT: {:?}", rep);
+        assert!(rep.bsd_name.starts_with("disk"));
+        assert!(rep.total_bytes > 0);
+        assert_ne!(rep.smart_status, "Non supporté");
+        assert!(
+            rep.is_lifetime_telemetry,
+            "Apple NVMe root SSD should expose native IOKit lifetime S.M.A.R.T. telemetry"
+        );
+        assert_eq!(rep.telemetry_scope, "lifetime_nvme_smart");
+        assert!(rep.bytes_written > 0);
+        assert!(rep.percentage_used.is_some());
+        assert!(rep.available_spare.is_some());
     }
 }

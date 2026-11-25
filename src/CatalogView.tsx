@@ -239,7 +239,7 @@ export default function CatalogView({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#191919]">
-      {/* ================= TOP SEARCH & FILTER BAR ================= */}
+      {/* TOP SEARCH & FILTER BAR */}
       <div className="px-5 py-3 border-b border-[#2A2A2A] bg-[#161616] flex flex-wrap items-center justify-between gap-3 shrink-0">
         {/* Search Input */}
         <div className="relative flex-1 min-w-[260px] max-w-xl">
@@ -289,7 +289,7 @@ export default function CatalogView({
         </button>
       </div>
 
-      {/* ================= MAIN SPLIT WORKSPACE ================= */}
+      {/* MAIN SPLIT WORKSPACE */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden">
         {/* LEFT COLUMN (4 cols): INDEXED DRIVES VAULT */}
         <div className="lg:col-span-4 border-r border-[#262626] flex flex-col min-h-0 overflow-hidden bg-[#161616]">

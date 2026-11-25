@@ -179,8 +179,8 @@ pub fn delete_single_snapshot(
     }
 
     // Try tmutil deletelocalsnapshots first if it's a TimeMachine snapshot
-    if name.contains("com.apple.TimeMachine.") {
-        let sub = &name[name.find("com.apple.TimeMachine.").unwrap() + "com.apple.TimeMachine.".len()..];
+    if let Some(idx) = name.find("com.apple.TimeMachine.") {
+        let sub = &name[idx + "com.apple.TimeMachine.".len()..];
         let date_part = sub.trim_end_matches(".local");
         let output = Command::new("/usr/bin/tmutil")
             .args(["deletelocalsnapshots", date_part])

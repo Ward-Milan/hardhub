@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.0-10B981.svg?style=flat-square" alt="Version 1.0.0" />
+  <img src="https://img.shields.io/badge/Version-1.0.2-10B981.svg?style=flat-square" alt="Version 1.0.2" />
   <img src="https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon)-3B82F6.svg?style=flat-square" alt="macOS" />
   <img src="https://img.shields.io/badge/Engine-Rust%20%2B%20Tauri%20v2-F59E0B.svg?style=flat-square" alt="Rust Tauri" />
   <img src="https://img.shields.io/badge/UI-React%2018%20%7C%20Tailwind%20CSS-191919.svg?style=flat-square" alt="React Tailwind" />
@@ -77,16 +77,17 @@
 Le package d'installation autonome macOS (Apple Silicon) est disponible :
 
 <p align="center">
-  <a href="https://github.com/Ward-Milan/hardhub/releases/latest/download/HardHub_1.0.0_macOS.dmg">
-    <img src="https://img.shields.io/badge/Télécharger_HardHub_v1.0.0-10B981?style=for-the-badge&logo=apple&logoColor=white" height="42" alt="Télécharger HardHub DMG" />
+  <a href="https://github.com/Ward-Milan/hardhub/releases/latest/download/HardHub_1.0.2_aarch64.dmg">
+    <img src="https://img.shields.io/badge/Télécharger_HardHub_v1.0.2-10B981?style=for-the-badge&logo=apple&logoColor=white" height="42" alt="Télécharger HardHub DMG" />
   </a>
 </p>
 
 ### Installation sur macOS
-1. Téléchargez et ouvrez **`HardHub_1.0.0_macOS.dmg`**.
+1. Téléchargez et ouvrez **`HardHub_1.0.2_aarch64.dmg`** (ou directement depuis le dépôt : [HardHub_1.0.2_aarch64.dmg](HardHub_1.0.2_aarch64.dmg)).
 2. Glissez-déposez **HardHub.app** dans votre dossier **/Applications**.
 3. **Premier lancement (sécurité macOS / Gatekeeper)** : L'application étant open-source et gratuite (sans abonnement payant Apple Developer), macOS peut bloquer sa première ouverture. Pour l'autoriser :
    - Lancez l'app une première fois, puis allez dans **Réglages Système › Confidentialité et sécurité**, descendez tout en bas et cliquez sur **« Ouvrir quand même »**.
+   - Pour les opérations sur disques externes (`/Volumes/*`), autorisez également **HardHub** dans **Confidentialité et sécurité › Accès complet au disque** et **Fichiers et dossiers** (un bouton direct est intégré dans l'application si macOS bloque l'accès).
    - *(En cas de blocage persistant sur macOS Sequoia+, vous pouvez aussi lancer dans le Terminal : `xattr -cr /Applications/HardHub.app`).*
 
 ---

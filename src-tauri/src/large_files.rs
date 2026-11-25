@@ -1,9 +1,14 @@
+use crate::space_lens::{is_system_or_bundle_artifact, is_unsafe_for_generic_cleanup};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
+
+const MAX_WALKED_ENTRIES: usize = 250_000;
+const MAX_RETURNED_ITEMS: usize = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +30,7 @@ pub struct LargeFilesReport {
     pub total_scanned_files: usize,
     pub matched_files_count: usize,
     pub total_matched_bytes: u64,
+    pub truncated: bool,
     pub items: Vec<LargeFileItem>,
 }
 
@@ -81,34 +87,43 @@ pub fn scan_large_and_old_files(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // Collect candidate paths
     let mut total_scanned = 0usize;
     let mut candidates = Vec::new();
+    let mut truncated = false;
 
     for entry in WalkDir::new(root)
+        .follow_links(false)
         .max_depth(8)
         .into_iter()
         .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            if name.starts_with('.') && name != ".Trash" && name != ".Trashes" {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.file_type().is_symlink() {
                 return false;
             }
-            let p = e.path();
-            let p_str = p.to_string_lossy();
-            !(p_str.starts_with("/System")
-                || p_str.starts_with("/private")
-                || p_str.starts_with("/dev")
-                || p_str.starts_with("/proc")
-                || p_str.contains("/.Spotlight-V100")
-                || p_str.contains("/.fseventsd"))
+            let name = e.file_name().to_string_lossy();
+            if name.starts_with('.') {
+                return false;
+            }
+            !is_system_or_bundle_artifact(e.path())
         })
         .flatten()
     {
         total_scanned += 1;
-        if entry.file_type().is_file() {
+        if total_scanned > MAX_WALKED_ENTRIES {
+            truncated = true;
+            break;
+        }
+        let ft = entry.file_type();
+        if !ft.is_symlink() && ft.is_file() {
             if let Ok(meta) = entry.metadata() {
-                if meta.len() >= min_size_bytes {
-                    candidates.push((entry.into_path(), meta.len()));
+                let sz = meta.len();
+                if meta.blocks() == 0 && sz > 0 {
+                    continue;
+                }
+                if sz >= min_size_bytes {
+                    candidates.push((entry.into_path(), sz));
                 }
             }
         }
@@ -160,8 +175,11 @@ pub fn scan_large_and_old_files(
         })
         .collect();
 
-    // Sort: largest files first
     items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    if items.len() > MAX_RETURNED_ITEMS {
+        items.truncate(MAX_RETURNED_ITEMS);
+        truncated = true;
+    }
 
     let matched_files_count = items.len();
     let total_matched_bytes: u64 = items.iter().map(|i| i.size_bytes).sum();
@@ -171,6 +189,7 @@ pub fn scan_large_and_old_files(
         total_scanned_files: total_scanned,
         matched_files_count,
         total_matched_bytes,
+        truncated,
         items,
     })
 }
@@ -189,51 +208,21 @@ pub fn purge_large_files_list(
             continue;
         }
 
-        // Safety: protect root and system paths
-        if path_str == "/"
-            || path_str.starts_with("/System")
-            || path_str.starts_with("/Applications")
-            || path_str.starts_with("/Library")
-        {
-            errors.push(format!("Sécurité : suppression refusée sur '{}'.", path_str));
+        if is_unsafe_for_generic_cleanup(p) {
+            errors.push(format!("Sécurité : suppression refusée sur le fichier protégé '{}'.", path_str));
             continue;
         }
 
         let size = p.metadata().map(|m| m.len()).unwrap_or(0);
 
         if move_to_trash {
-            #[cfg(target_os = "macos")]
-            {
-                let script = format!(
-                    "tell application \"Finder\" to delete POSIX file \"{}\"",
-                    path_str.replace('"', "\\\"")
-                );
-                let res = std::process::Command::new("osascript")
-                    .args(["-e", &script])
-                    .output();
-                match res {
-                    Ok(out) if out.status.success() => {
-                        deleted_count += 1;
-                        freed_bytes = freed_bytes.saturating_add(size);
-                    }
-                    _ => {
-                        // Fallback to direct deletion if Finder fails
-                        if let Err(e) = fs::remove_file(p) {
-                            errors.push(format!("{}: {}", path_str, e));
-                        } else {
-                            deleted_count += 1;
-                            freed_bytes = freed_bytes.saturating_add(size);
-                        }
-                    }
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                if let Err(e) = fs::remove_file(p) {
-                    errors.push(format!("{}: {}", path_str, e));
-                } else {
+            match crate::drives::move_path_to_macos_trash(p) {
+                Ok(_) => {
                     deleted_count += 1;
                     freed_bytes = freed_bytes.saturating_add(size);
+                }
+                Err(e) => {
+                    errors.push(format!("{}: {}", path_str, e));
                 }
             }
         } else if let Err(e) = fs::remove_file(p) {

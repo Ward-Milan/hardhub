@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  AlertTriangle,
   FolderOpen,
   Folder,
   File,
@@ -16,6 +17,7 @@ import {
   Flame,
   HardDrive,
   Cloud,
+  ShieldAlert,
   X,
   PieChart,
 } from "lucide-react";
@@ -211,6 +213,8 @@ export default function SpaceLensView({
     "children"
   );
   const [collector, setCollector] = useState<CollectorItem[]>([]);
+  const [moveToTrash, setMoveToTrash] = useState(true);
+  const [confirmIrreversible, setConfirmIrreversible] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
   const [confirmPurgeModal, setConfirmPurgeModal] = useState(false);
 
@@ -220,8 +224,6 @@ export default function SpaceLensView({
         setPresets(list);
         if (initialTargetPath) {
           handleRunScan(initialTargetPath);
-        } else if (list.length > 0 && !report) {
-          handleRunScan(list[0].path);
         }
       })
       .catch((e) => onShowError(String(e)));
@@ -313,6 +315,7 @@ export default function SpaceLensView({
       const paths = collector.map((c) => c.path);
       const res = await invoke<PurgeCollectorResult>("purge_space_collector", {
         paths,
+        moveToTrash,
       });
       setConfirmPurgeModal(false);
       setCollector([]);
@@ -321,9 +324,9 @@ export default function SpaceLensView({
       }
       if (res.deletedCount > 0) {
         onShowToast(
-          `${res.deletedCount} élément(s) supprimé(s) (${formatBytes(
-            res.freedBytes
-          )} libérés)`
+          `${res.deletedCount} élément(s) ${
+            moveToTrash ? "déplacé(s) dans la Corbeille" : "supprimé(s)"
+          } (${formatBytes(res.freedBytes)} libérés)`
         );
       }
       onRefreshDrives();
@@ -359,7 +362,7 @@ export default function SpaceLensView({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#191919]">
-      {/* ================= TOP TARGET BAR ================= */}
+      {/* TOP TARGET BAR */}
       <div className="px-5 py-3 border-b border-[#2A2A2A] bg-[#161616] flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div className="flex flex-wrap items-center gap-1.5">
           {/* Mounted External & Cloud Drives */}
@@ -436,7 +439,7 @@ export default function SpaceLensView({
         </div>
       </div>
 
-      {/* ================= BREADCRUMB & CATEGORY BAR ================= */}
+      {/* BREADCRUMB & CATEGORY BAR */}
       {report && currentFocusNode && (
         <div className="px-5 py-2 border-b border-[#252525] bg-[#191919] flex items-center justify-between gap-4 shrink-0">
           {/* Breadcrumbs */}
@@ -474,7 +477,7 @@ export default function SpaceLensView({
         </div>
       )}
 
-      {/* ================= MAIN SPLIT VIEW: SUNBURST + LIST ================= */}
+      {/* MAIN SPLIT VIEW: SUNBURST + LIST */}
       {isScanning ? (
         <ScanningRadar
           icon={<PieChart className="w-8 h-8 text-[#3B82F6]" />}
@@ -489,11 +492,53 @@ export default function SpaceLensView({
           ]}
         />
       ) : !report || !currentFocusNode ? (
-        <div className="flex-1 flex items-center justify-center p-8 text-center">
-          <div className="space-y-3">
-            <p className="text-xs text-[#9B9A97]">
-              Sélectionnez un support ou un dossier ci-dessus pour lancer Space Lens.
-            </p>
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-lg w-full bg-[#202020] border border-[#2F2F2F] rounded-2xl p-6 space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#3B82F6]/15 border border-[#3B82F6]/30 flex items-center justify-center shrink-0">
+                <PieChart className="w-5 h-5 text-[#60A5FA]" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-[#EDEDEC]">
+                  Cartographie visuelle Space Lens
+                </h3>
+                <p className="text-xs text-[#9B9A97] mt-1">
+                  Choisissez un support ou un dossier ci-dessus ou lancez l&apos;analyse du dossier utilisateur.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#161616] border border-[#2C2C2C] flex items-start gap-2.5 text-xs text-[#9B9A97]">
+              <ShieldAlert className="w-4 h-4 text-[#10B981] shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed">
+                L&apos;exploration Space Lens est en lecture seule. Vous pouvez ensuite collecter les éléments inutiles et choisir entre la Corbeille ou la suppression définitive.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              {(presets[0]?.path || drives.find((d) => !d.isCloud)?.mountPoint) && (
+                <button
+                  onClick={() =>
+                    handleRunScan(
+                      presets[0]?.path ||
+                        drives.find((d) => !d.isCloud)?.mountPoint ||
+                        "/"
+                    )
+                  }
+                  className="px-4 py-2.5 rounded-xl bg-[#3B82F6] hover:bg-[#2563EB] text-white text-xs font-semibold flex items-center gap-2 cursor-pointer"
+                >
+                  <PieChart className="w-3.5 h-3.5" />
+                  <span>Lancer Space Lens</span>
+                </button>
+              )}
+              <button
+                onClick={handlePickCustomFolder}
+                className="px-4 py-2.5 rounded-xl bg-[#262626] hover:bg-[#303030] border border-[#383838] text-xs font-medium text-[#EDEDEC] flex items-center gap-2 cursor-pointer"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-[#3B82F6]" />
+                <span>Choisir un dossier…</span>
+              </button>
+            </div>
           </div>
         </div>
       ) : (
@@ -860,7 +905,7 @@ export default function SpaceLensView({
         </div>
       )}
 
-      {/* ================= BOTTOM DOCK: PURGE COLLECTOR ================= */}
+      {/* BOTTOM DOCK: PURGE COLLECTOR */}
       {collector.length > 0 && (
         <div className="px-5 py-3 border-t border-[#382323] bg-[#1D1616] flex items-center justify-between gap-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -876,24 +921,39 @@ export default function SpaceLensView({
                   {formatBytes(totalCollectedBytes)} à libérer
                 </span>
               </div>
-              <div className="flex items-center gap-1.5 overflow-x-auto mt-1">
-                {collector.map((item) => (
-                  <span
-                    key={item.path}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#2A1E1E] border border-[#422B2B] text-[10px] text-[#EDEDEC] shrink-0"
-                  >
-                    <span className="truncate max-w-[140px]">{item.name}</span>
-                    <span className="font-mono text-[#FCA5A5]">
-                      ({formatBytes(item.sizeBytes)})
-                    </span>
-                    <button
-                      onClick={() => toggleCollectorItem(item)}
-                      className="hover:text-[#EF4444] cursor-pointer"
+              <div className="flex flex-wrap items-center gap-3 mt-1">
+                <label className="flex items-center gap-1.5 text-[11px] text-[#9B9A97] hover:text-[#EDEDEC] cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={moveToTrash}
+                    onChange={(e) => {
+                      setMoveToTrash(e.target.checked);
+                      setConfirmIrreversible(false);
+                    }}
+                    className="accent-[#10B981] rounded"
+                  />
+                  <span>Déplacer dans la Corbeille (récupérable)</span>
+                </label>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto">
+                  {collector.map((item) => (
+                    <span
+                      key={item.path}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#2A1E1E] border border-[#422B2B] text-[10px] text-[#EDEDEC] shrink-0"
                     >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
+                      <span className="truncate max-w-[140px]">{item.name}</span>
+                      <span className="font-mono text-[#FCA5A5]">
+                        ({formatBytes(item.sizeBytes)})
+                      </span>
+                      <button
+                        onClick={() => toggleCollectorItem(item)}
+                        className="hover:text-[#EF4444] cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -906,7 +966,10 @@ export default function SpaceLensView({
               Vider
             </button>
             <button
-              onClick={() => setConfirmPurgeModal(true)}
+              onClick={() => {
+                setConfirmIrreversible(false);
+                setConfirmPurgeModal(true);
+              }}
               className="px-4 py-1.5 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -916,15 +979,15 @@ export default function SpaceLensView({
         </div>
       )}
 
-      {/* ================= CONFIRMATION MODAL FOR PURGE COLLECTOR ================= */}
+      {/* CONFIRMATION MODAL FOR PURGE COLLECTOR */}
       {confirmPurgeModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#202020] border border-[#333333] rounded-2xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-lg bg-[#202020] border border-[#333333] rounded-2xl shadow-2xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-[#2C2C2C] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-[#EF4444]" />
                 <h3 className="text-sm font-semibold text-[#EDEDEC]">
-                  Confirmer la purge immédiate
+                  Confirmer la purge du collecteur
                 </h3>
               </div>
               <button
@@ -936,8 +999,31 @@ export default function SpaceLensView({
             </div>
 
             <div className="p-5 space-y-4">
+              {moveToTrash ? (
+                <div className="p-3 rounded-xl bg-[#10B981]/10 border border-[#10B981]/30 text-xs text-[#34D399] flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <span>
+                    Déplacement vers la Corbeille macOS — éléments récupérables ultérieurement.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-[#EF4444]/15 border border-[#EF4444]/40 text-xs text-[#FCA5A5] space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-[#EF4444]">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>ACTION IRRÉVERSIBLE — Suppression définitive sans passer par la Corbeille</span>
+                  </div>
+                  <p className="text-[11px] text-[#FCA5A5]/90">
+                    Ces éléments seront supprimés immédiatement sans passer par `.Trashes`.
+                  </p>
+                </div>
+              )}
+
               <p className="text-xs text-[#9B9A97]">
-                Ces {collector.length} élément(s) seront supprimés définitivement (sans passer par `.Trashes`) pour libérer immédiatement{" "}
+                Ces {collector.length} élément(s) seront{" "}
+                <strong className="text-[#EDEDEC]">
+                  {moveToTrash ? "déplacés dans la Corbeille" : "supprimés définitivement"}
+                </strong>{" "}
+                pour libérer{" "}
                 <strong className="text-[#EDEDEC]">
                   {formatBytes(totalCollectedBytes)}
                 </strong>
@@ -960,6 +1046,20 @@ export default function SpaceLensView({
                 ))}
               </div>
 
+              {!moveToTrash && (
+                <label className="flex items-center gap-2 text-xs text-[#EDEDEC] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={confirmIrreversible}
+                    onChange={(e) => setConfirmIrreversible(e.target.checked)}
+                    className="accent-[#EF4444]"
+                  />
+                  <span>
+                    Je comprends que cette suppression est définitive et irréversible
+                  </span>
+                </label>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   onClick={() => setConfirmPurgeModal(false)}
@@ -969,8 +1069,8 @@ export default function SpaceLensView({
                 </button>
                 <button
                   onClick={handleExecuteCollectorPurge}
-                  disabled={isPurging}
-                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+                  disabled={isPurging || (!moveToTrash && !confirmIrreversible)}
+                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>

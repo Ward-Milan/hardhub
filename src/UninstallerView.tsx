@@ -92,6 +92,7 @@ export default function UninstallerView({
 
   const [moveToTrash, setMoveToTrash] = useState(true);
   const [confirmUninstallModal, setConfirmUninstallModal] = useState(false);
+  const [confirmIrreversible, setConfirmIrreversible] = useState(false);
   const [isUninstalling, setIsUninstalling] = useState(false);
 
   const loadApps = async () => {
@@ -227,7 +228,7 @@ export default function UninstallerView({
 
   return (
     <div className="flex-1 flex min-h-0 overflow-hidden bg-[#191919]">
-      {/* ================= LEFT COLUMN: APPS LIST (5 cols) ================= */}
+      {/* LEFT COLUMN: APPS LIST (5 cols) */}
       <div className="w-80 md:w-96 border-r border-[#262626] bg-[#161616] flex flex-col min-h-0 overflow-hidden shrink-0">
         {/* Search & Refresh */}
         <div className="p-3 border-b border-[#242424] space-y-2 shrink-0">
@@ -372,7 +373,7 @@ export default function UninstallerView({
         </div>
       </div>
 
-      {/* ================= RIGHT COLUMN: APP INSPECTOR / RESIDUALS CLEANER ================= */}
+      {/* RIGHT COLUMN: APP INSPECTOR / RESIDUALS CLEANER */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#191919]">
         {isLoadingDetails ? (
           <ScanningRadar
@@ -582,7 +583,10 @@ export default function UninstallerView({
                     <input
                       type="checkbox"
                       checked={moveToTrash}
-                      onChange={(e) => setMoveToTrash(e.target.checked)}
+                      onChange={(e) => {
+                        setMoveToTrash(e.target.checked);
+                        setConfirmIrreversible(false);
+                      }}
                       className="accent-[#10B981] rounded"
                     />
                     <span>Déplacer dans la Corbeille (récupérable)</span>
@@ -590,7 +594,10 @@ export default function UninstallerView({
                 </div>
 
                 <button
-                  onClick={() => setConfirmUninstallModal(true)}
+                  onClick={() => {
+                    setConfirmIrreversible(false);
+                    setConfirmUninstallModal(true);
+                  }}
                   disabled={selectedItems.length === 0}
                   className="px-4 py-2 rounded-xl bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
@@ -605,7 +612,7 @@ export default function UninstallerView({
         )}
       </div>
 
-      {/* ================= CONFIRM UNINSTALL MODAL ================= */}
+      {/* CONFIRM UNINSTALL MODAL */}
       {confirmUninstallModal && appDetails && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#202020] border border-[#333333] rounded-2xl shadow-2xl overflow-hidden">
@@ -625,6 +632,25 @@ export default function UninstallerView({
             </div>
 
             <div className="p-5 space-y-4">
+              {moveToTrash ? (
+                <div className="p-3 rounded-xl bg-[#10B981]/10 border border-[#10B981]/30 text-xs text-[#34D399] flex items-center gap-2">
+                  <Shield className="w-4 h-4 shrink-0" />
+                  <span>
+                    Déplacement vers la Corbeille macOS — éléments récupérables.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-[#EF4444]/15 border border-[#EF4444]/40 text-xs text-[#FCA5A5] space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-[#EF4444]">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>ACTION IRRÉVERSIBLE — Suppression définitive sans Corbeille</span>
+                  </div>
+                  <p className="text-[11px] text-[#FCA5A5]/90">
+                    L&apos;application et ses fichiers résiduels seront définitivement supprimés.
+                  </p>
+                </div>
+              )}
+
               <p className="text-xs text-[#9B9A97]">
                 L&apos;application ainsi que tous ses résidus sélectionnés ({selectedItems.length} éléments) seront {moveToTrash ? "déplacés dans la Corbeille" : "supprimés définitivement"} pour libérer{" "}
                 <strong className="text-[#38BDF8] font-mono">
@@ -649,6 +675,20 @@ export default function UninstallerView({
                 ))}
               </div>
 
+              {!moveToTrash && (
+                <label className="flex items-center gap-2 text-xs text-[#EDEDEC] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={confirmIrreversible}
+                    onChange={(e) => setConfirmIrreversible(e.target.checked)}
+                    className="accent-[#EF4444]"
+                  />
+                  <span>
+                    Je comprends que cette suppression est définitive et irréversible
+                  </span>
+                </label>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   onClick={() => setConfirmUninstallModal(false)}
@@ -658,8 +698,8 @@ export default function UninstallerView({
                 </button>
                 <button
                   onClick={handleExecuteUninstall}
-                  disabled={isUninstalling}
-                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+                  disabled={isUninstalling || (!moveToTrash && !confirmIrreversible)}
+                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>

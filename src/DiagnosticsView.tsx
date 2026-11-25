@@ -66,6 +66,14 @@ export default function DiagnosticsView({
   const [flashProgress, setFlashProgress] = useState<FlashTestProgress | null>(null);
   const [flashResult, setFlashResult] = useState<FlashTestResult | null>(null);
 
+  const selectedDrive = useMemo(
+    () =>
+      drives.find((d) => d.mountPoint === selectedMountPoint) ||
+      drives[0] ||
+      null,
+    [drives, selectedMountPoint]
+  );
+
   const selectedFlashDrive = useMemo(
     () =>
       externalRemovableDrives.find((d) => d.id === flashTargetId) ||
@@ -74,11 +82,14 @@ export default function DiagnosticsView({
     [externalRemovableDrives, flashTargetId]
   );
 
-  const handleLoadSsdHealth = async (mountPoint: string) => {
+  const handleLoadSsdHealth = async (mountPoint: string, bsdOverride?: string) => {
+    const matchedDrive = drives.find((d) => d.mountPoint === mountPoint);
+    const targetBsd = (bsdOverride || matchedDrive?.bsdName || mountPoint).trim();
+    if (!targetBsd) return;
     setIsLoadingHealth(true);
     try {
       const rep = await invoke<SsdHealthReport>("get_ssd_health_cmd", {
-        mountPoint,
+        bsdName: targetBsd,
       });
       setSsdHealth(rep);
     } catch (err) {
@@ -153,14 +164,14 @@ export default function DiagnosticsView({
     };
   }, []);
 
-  // Run SSD health check only when selected mount point changes (NOT continuously!)
+  // Run SSD health check only when selected mount point or resolved BSD name changes
   useEffect(() => {
-    handleLoadSsdHealth(selectedMountPoint);
-  }, [selectedMountPoint]);
+    handleLoadSsdHealth(selectedMountPoint, selectedDrive?.bsdName);
+  }, [selectedMountPoint, selectedDrive?.bsdName]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-6 space-y-6 bg-[#191919]">
-      {/* ================= TARGET DRIVE SELECTOR ================= */}
+      {/* TARGET DRIVE SELECTOR */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#282828]">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-[#9B9A97] mr-1">
@@ -190,7 +201,7 @@ export default function DiagnosticsView({
         </div>
 
         <button
-          onClick={() => handleLoadSsdHealth(selectedMountPoint)}
+          onClick={() => handleLoadSsdHealth(selectedMountPoint, selectedDrive?.bsdName)}
           disabled={isLoadingHealth}
           className="px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-[#2B2B2B] border border-[#323232] text-xs text-[#9B9A97] hover:text-[#EDEDEC] flex items-center gap-1.5 cursor-pointer"
         >
@@ -201,7 +212,7 @@ export default function DiagnosticsView({
         </button>
       </div>
 
-      {/* ================= DIAGNOSTICS GRID ================= */}
+      {/* DIAGNOSTICS GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* CARD 1 (12 cols): SANTÉ & USURE SSD EXPRESS */}
         <div className="lg:col-span-12 bg-[#202020] border border-[#2F2F2F] rounded-2xl p-5 space-y-4">
@@ -223,24 +234,30 @@ export default function DiagnosticsView({
             {ssdHealth && (
               <span
                 className={`px-3 py-1 rounded-xl text-xs font-medium border flex items-center gap-1.5 ${
-                  ssdHealth.healthPercent >= 90
+                  !ssdHealth.isLifetimeTelemetry
+                    ? "bg-[#262626] text-[#9B9A97] border-[#383838]"
+                    : ssdHealth.healthPercent >= 90
                     ? "bg-[#10B981]/15 text-[#34D399] border-[#10B981]/30"
                     : ssdHealth.healthPercent >= 70
                     ? "bg-[#F59E0B]/15 text-[#FBBF24] border-[#F59E0B]/30"
                     : "bg-[#EF4444]/15 text-[#F87171] border-[#EF4444]/30"
                 }`}
               >
-                {ssdHealth.healthPercent >= 90 ? (
+                {!ssdHealth.isLifetimeTelemetry ? (
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                ) : ssdHealth.healthPercent >= 90 ? (
                   <CheckCircle2 className="w-3.5 h-3.5" />
                 ) : (
                   <AlertTriangle className="w-3.5 h-3.5" />
                 )}
                 <span>
-                  {ssdHealth.healthPercent >= 90
-                    ? "Santé Optimale"
+                  {!ssdHealth.isLifetimeTelemetry
+                    ? "S.M.A.R.T. usine non exposé"
+                    : ssdHealth.healthPercent >= 90
+                    ? "Santé Optimale (NVMe)"
                     : ssdHealth.healthPercent >= 70
-                    ? "État Correct"
-                    : "Usure Avancée"}
+                    ? "État Correct (NVMe)"
+                    : "Usure Avancée (NVMe)"}
                 </span>
               </span>
             )}
@@ -263,33 +280,43 @@ export default function DiagnosticsView({
                     </span>
                   </div>
 
-                  <div className="flex items-baseline gap-2 my-2">
-                    <span
-                      className={`text-4xl font-extrabold font-mono tracking-tight ${
-                        ssdHealth.healthPercent >= 90
-                          ? "text-[#34D399]"
-                          : ssdHealth.healthPercent >= 70
-                          ? "text-[#FBBF24]"
-                          : "text-[#F87171]"
-                      }`}
-                    >
-                      {ssdHealth.healthPercent}%
-                    </span>
-                    <span className="text-xs text-[#9B9A97]">d&apos;espérance de vie</span>
-                  </div>
+                  {ssdHealth.isLifetimeTelemetry ? (
+                    <>
+                      <div className="flex items-baseline gap-2 my-2">
+                        <span
+                          className={`text-4xl font-extrabold font-mono tracking-tight ${
+                            ssdHealth.healthPercent >= 90
+                              ? "text-[#34D399]"
+                              : ssdHealth.healthPercent >= 70
+                              ? "text-[#FBBF24]"
+                              : "text-[#F87171]"
+                          }`}
+                        >
+                          {ssdHealth.healthPercent}%
+                        </span>
+                        <span className="text-xs text-[#9B9A97]">
+                          vie restante (usure : {ssdHealth.percentageUsed ?? 0}%)
+                        </span>
+                      </div>
 
-                  <div className="h-2 rounded-full bg-[#262626] overflow-hidden mb-3">
-                    <div
-                      style={{ width: `${Math.min(100, Math.max(5, ssdHealth.healthPercent))}%` }}
-                      className={`h-full transition-all duration-300 ${
-                        ssdHealth.healthPercent >= 90
-                          ? "bg-[#10B981]"
-                          : ssdHealth.healthPercent >= 70
-                          ? "bg-[#F59E0B]"
-                          : "bg-[#EF4444]"
-                      }`}
-                    />
-                  </div>
+                      <div className="h-2 rounded-full bg-[#262626] overflow-hidden mb-3">
+                        <div
+                          style={{ width: `${Math.min(100, Math.max(3, ssdHealth.healthPercent))}%` }}
+                          className={`h-full transition-all duration-300 ${
+                            ssdHealth.healthPercent >= 90
+                              ? "bg-[#10B981]"
+                              : ssdHealth.healthPercent >= 70
+                              ? "bg-[#F59E0B]"
+                              : "bg-[#EF4444]"
+                          }`}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="my-3 px-3 py-2.5 rounded-lg bg-[#202020] border border-[#2C2C2C] text-[11px] text-[#9B9A97]">
+                      Compteur d&apos;usure usine indisponible via le pont {ssdHealth.protocol || "USB"}.
+                    </div>
+                  )}
 
                   <div className="text-xs font-semibold text-[#EDEDEC]">
                     {ssdHealth.statusVerdict}
@@ -303,47 +330,100 @@ export default function DiagnosticsView({
 
               {/* 2. Cumulative TBW & Wear */}
               <div className="bg-[#171717] border border-[#282828] rounded-xl p-4 flex flex-col justify-between space-y-3">
-                <div>
-                  <div className="flex items-center justify-between text-xs text-[#9B9A97] mb-1">
-                    <span>Endurance Écrite (TBW)</span>
-                    <span className="text-[11px] font-mono text-[#EDEDEC]">
-                      {ssdHealth.tbwWritten.toFixed(1)} / {ssdHealth.ratedTbw} To
-                    </span>
-                  </div>
+                {ssdHealth.isLifetimeTelemetry ? (
+                  <>
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-[#9B9A97] mb-1">
+                        <span>Endurance Écrite à vie (TBW)</span>
+                        <span className="text-[11px] font-mono text-[#EDEDEC]">
+                          {ssdHealth.tbwWritten.toFixed(2)} / {ssdHealth.ratedTbw} To
+                        </span>
+                      </div>
 
-                  <div className="flex items-baseline gap-1.5 my-2">
-                    <span className="text-2xl font-bold font-mono text-[#EDEDEC]">
-                      {ssdHealth.tbwWritten.toFixed(1)} To
-                    </span>
-                    <span className="text-xs text-[#787774]">écrits à ce jour</span>
-                  </div>
+                      <div className="flex items-baseline gap-1.5 my-2">
+                        <span className="text-2xl font-bold font-mono text-[#EDEDEC]">
+                          {ssdHealth.tbwWritten >= 1
+                            ? `${ssdHealth.tbwWritten.toFixed(2)} To`
+                            : formatBytes(ssdHealth.bytesWritten)}
+                        </span>
+                        <span className="text-xs text-[#787774]">cumul usine NVMe</span>
+                      </div>
 
-                  <div className="h-2 rounded-full bg-[#262626] overflow-hidden mb-2">
-                    <div
-                      style={{
-                        width: `${Math.min(100, (ssdHealth.tbwWritten / ssdHealth.ratedTbw) * 100)}%`,
-                      }}
-                      className="h-full bg-[#3B82F6] transition-all duration-300"
-                    />
-                  </div>
+                      <div className="h-2 rounded-full bg-[#262626] overflow-hidden mb-2">
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.max(1, ssdHealth.percentageUsed ?? (ssdHealth.tbwWritten / ssdHealth.ratedTbw) * 100))}%`,
+                          }}
+                          className="h-full bg-[#3B82F6] transition-all duration-300"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between text-[11px] text-[#787774]">
-                    <span>Usure endurance constructeur</span>
-                    <span className="font-mono text-[#EDEDEC]">
-                      {((ssdHealth.tbwWritten / ssdHealth.ratedTbw) * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
+                      <div className="flex items-center justify-between text-[11px] text-[#787774]">
+                        <span>Usure contrôleur NVMe</span>
+                        <span className="font-mono text-[#EDEDEC]">
+                          {ssdHealth.percentageUsed ?? 0}%
+                        </span>
+                      </div>
+                    </div>
 
-                <div className="pt-2 border-t border-[#242424] space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-[#9B9A97]">Données lues :</span>
-                    <span className="font-mono text-[#EDEDEC]">{ssdHealth.tbrRead.toFixed(1)} To</span>
-                  </div>
-                  <p className="text-[10px] text-[#787774] leading-tight">
-                    Basé sur la norme d&apos;endurance standard de {ssdHealth.ratedTbw} TBW pour cette capacité.
-                  </p>
-                </div>
+                    <div className="pt-2 border-t border-[#242424] space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#9B9A97]">Données lues à vie :</span>
+                        <span className="font-mono text-[#EDEDEC]">
+                          {ssdHealth.tbrRead >= 1
+                            ? `${ssdHealth.tbrRead.toFixed(2)} To`
+                            : formatBytes(ssdHealth.bytesRead)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#9B9A97]">Blocs de réserve (Spare) :</span>
+                        <span className="font-mono text-[#34D399]">
+                          {ssdHealth.availableSpare !== null && ssdHealth.availableSpare !== undefined
+                            ? `${ssdHealth.availableSpare}%`
+                            : "N/A"}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[#787774] leading-tight">
+                        Valeurs lues directement depuis le registre matériel NVMe S.M.A.R.T. (Log Page 02h).
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-[#9B9A97] mb-1">
+                        <span>Endurance TBW (Cumul usine)</span>
+                        <span className="text-[11px] font-mono text-[#787774]">Non exposé</span>
+                      </div>
+
+                      <div className="my-2 text-lg font-bold font-mono text-[#9B9A97]">
+                        Indisponible via {ssdHealth.protocol || "USB"}
+                      </div>
+
+                      <p className="text-[11px] text-[#787774] leading-relaxed">
+                        Les ponts USB et lecteurs SD standards ne transmettent pas le cumul TBW d&apos;usine à macOS. HardHub n&apos;affiche pas de fausse estimation.
+                      </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#242424] space-y-1">
+                      <div className="text-[10px] uppercase tracking-wider text-[#787774]">
+                        Activité depuis le branchement (session)
+                      </div>
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#9B9A97]">Écrit cette session :</span>
+                        <span className="font-mono text-[#EDEDEC]">
+                          {formatBytes(ssdHealth.bytesWritten)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#9B9A97]">Lu cette session :</span>
+                        <span className="font-mono text-[#EDEDEC]">
+                          {formatBytes(ssdHealth.bytesRead)}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* 3. Hardware sensors */}
@@ -364,24 +444,35 @@ export default function DiagnosticsView({
                     <div className="flex items-center justify-between p-2 rounded-lg bg-[#202020] border border-[#282828]">
                       <span className="text-[#9B9A97] flex items-center gap-1.5">
                         <Database className="w-3.5 h-3.5 text-[#3B82F6]" />
-                        <span>Erreurs de lecture / I/O</span>
+                        <span>
+                          {ssdHealth.isLifetimeTelemetry ? "Erreurs média NAND" : "Erreurs I/O session"}
+                        </span>
                       </span>
                       <span className="font-mono font-bold text-[#EDEDEC]">
                         {ssdHealth.errorsCount} erreur(s)
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-2 rounded-lg bg-[#202020] border border-[#282828]">
-                      <span className="text-[#9B9A97]">Données lues (cumul)</span>
-                      <span className="font-mono text-[#EDEDEC]">
-                        {ssdHealth.tbrRead ? `${ssdHealth.tbrRead} To` : formatBytes(ssdHealth.bytesRead)}
-                      </span>
-                    </div>
+                    {ssdHealth.isLifetimeTelemetry ? (
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-[#202020] border border-[#282828]">
+                        <span className="text-[#9B9A97]">Heures / Cycles</span>
+                        <span className="font-mono text-[#EDEDEC]">
+                          {ssdHealth.powerOnHours ?? 0} h • {ssdHealth.powerCycles ?? 0} cycles
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-[#202020] border border-[#282828]">
+                        <span className="text-[#9B9A97]">Protocole</span>
+                        <span className="font-mono text-[#EDEDEC]">
+                          {ssdHealth.protocol || "Externe"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="text-[10px] text-[#787774] font-mono truncate pt-2 border-t border-[#242424]">
-                  {ssdHealth.modelName || ssdHealth.bsdName}
+                  {ssdHealth.modelName || ssdHealth.bsdName} ({ssdHealth.bsdName})
                 </div>
               </div>
             </div>

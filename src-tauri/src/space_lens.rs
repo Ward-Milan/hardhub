@@ -420,44 +420,201 @@ pub fn scan_space_lens(target_path: &str) -> Result<SpaceLensReport, String> {
     })
 }
 
+const PROTECTED_SYSTEM_PREFIXES: &[&str] = &[
+    "/System",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/etc",
+    "/private/etc",
+    "/private/var",
+    "/var",
+    "/dev",
+    "/cores",
+    "/Applications/Utilities",
+    "/Library/Apple",
+    "/Library/Extensions",
+    "/Library/Frameworks",
+    "/Library/Keychains",
+    "/Library/Preferences/SystemConfiguration",
+];
+
+const GENERIC_CLEANUP_PREFIXES: &[&str] = &[
+    "/System",
+    "/Library",
+    "/Applications",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/private",
+    "/var",
+    "/etc",
+    "/dev",
+    "/cores",
+    "/opt",
+];
+
+const PROTECTED_BUNDLE_EXTENSIONS: &[&str] = &[
+    ".app",
+    ".framework",
+    ".bundle",
+    ".kext",
+    ".plugin",
+    ".xpc",
+    ".appex",
+    ".qlgenerator",
+    ".mdimporter",
+    ".prefpane",
+    ".photoslibrary",
+    ".musiclibrary",
+    ".tvlibrary",
+    ".fcpbundle",
+    ".imovielibrary",
+    ".logicx",
+    ".band",
+    ".xcodeproj",
+    ".xcworkspace",
+    ".xcarchive",
+    ".pkg",
+    ".mpkg",
+    ".sparsebundle",
+    ".sparseimage",
+];
+
+const PROTECTED_INTERNAL_FOLDERS: &[&str] = &[
+    ".git",
+    ".svn",
+    ".hg",
+    "node_modules",
+    ".cargo",
+    ".rustup",
+    ".venv",
+    "venv",
+    ".pyenv",
+    ".rbenv",
+    ".nvm",
+    ".npm",
+    ".yarn",
+    ".pnpm-store",
+    ".gradle",
+    ".m2",
+    ".Trash",
+    ".Trashes",
+    ".Spotlight-V100",
+    ".fseventsd",
+    ".DocumentRevisions-V100",
+    ".TemporaryItems",
+    "__pycache__",
+    "DerivedData",
+    "CloudStorage",
+    "Mobile Documents",
+];
+
+fn matches_prefix(path_str: &str, prefix: &str) -> bool {
+    path_str == prefix || path_str.starts_with(&format!("{}/", prefix))
+}
+
 pub fn is_protected_system_path(path: &Path) -> bool {
-    let normalized = path.to_string_lossy();
-    let trimmed = normalized.trim_end_matches('/');
-    if trimmed.is_empty()
-        || trimmed == "/System"
-        || trimmed == "/Users"
-        || trimmed == "/Applications"
-        || trimmed == "/Library"
-        || trimmed == "/Volumes"
-        || trimmed == "/bin"
-        || trimmed == "/sbin"
-        || trimmed == "/usr"
-        || trimmed == "/private"
-        || trimmed == "/var"
-        || trimmed == "/etc"
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
     {
         return true;
     }
-    if let Ok(home) = std::env::var("HOME") {
-        let home_trimmed = home.trim_end_matches('/');
-        if trimmed == home_trimmed
-            || trimmed == format!("{}/Desktop", home_trimmed)
-            || trimmed == format!("{}/Documents", home_trimmed)
-            || trimmed == format!("{}/Library", home_trimmed)
+
+    let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    for candidate in [path, resolved.as_path()] {
+        let normalized = candidate.to_string_lossy();
+        let trimmed = normalized.trim_end_matches('/');
+        if trimmed.is_empty()
+            || trimmed == "/Users"
+            || trimmed == "/Applications"
+            || trimmed == "/Library"
+            || trimmed == "/Volumes"
+            || trimmed == "/private"
+            || PROTECTED_SYSTEM_PREFIXES
+                .iter()
+                .any(|prefix| matches_prefix(trimmed, prefix))
         {
             return true;
         }
-    }
-    // Also protect the root of any mounted external volume (e.g. /Volumes/MySSD)
-    if let Some(parent) = path.parent() {
-        if parent == Path::new("/Volumes") {
-            return true;
+        if let Ok(home) = std::env::var("HOME") {
+            let home_trimmed = home.trim_end_matches('/');
+            for protected_sub in [
+                "",
+                "/Desktop",
+                "/Documents",
+                "/Library",
+                "/Pictures",
+                "/Movies",
+                "/Music",
+                "/Downloads",
+                "/Applications",
+                "/Public",
+            ] {
+                if trimmed == format!("{}{}", home_trimmed, protected_sub) {
+                    return true;
+                }
+            }
+        }
+        if let Some(parent) = candidate.parent() {
+            if parent == Path::new("/Volumes") {
+                return true;
+            }
         }
     }
     false
 }
 
-pub fn purge_collected_paths(paths: &[String]) -> PurgeCollectorResult {
+/// Checks whether a path resides in macOS system/library locations, bundles,
+/// or internal dev/cloud directories that must never be touched by generic
+/// duplicate or large-file cleanup.
+pub fn is_system_or_bundle_artifact(path: &Path) -> bool {
+    let resolved = fs::canonicalize(path).ok();
+    let candidates = [Some(path), resolved.as_deref()];
+    let home_lib = std::env::var("HOME")
+        .ok()
+        .map(|h| format!("{}/Library", h.trim_end_matches('/')));
+
+    for candidate in candidates.into_iter().flatten() {
+        let normalized = candidate.to_string_lossy();
+        let trimmed = normalized.trim_end_matches('/');
+        if trimmed.is_empty() {
+            return true;
+        }
+        if GENERIC_CLEANUP_PREFIXES
+            .iter()
+            .any(|prefix| matches_prefix(trimmed, prefix))
+        {
+            return true;
+        }
+        if let Some(ref lib) = home_lib {
+            if matches_prefix(trimmed, lib) {
+                return true;
+            }
+        }
+        for comp in candidate.components() {
+            let name = comp.as_os_str().to_string_lossy();
+            let lower = name.to_lowercase();
+            if PROTECTED_BUNDLE_EXTENSIONS
+                .iter()
+                .any(|ext| lower.ends_with(ext))
+            {
+                return true;
+            }
+            if PROTECTED_INTERNAL_FOLDERS.contains(&name.as_ref()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn is_unsafe_for_generic_cleanup(path: &Path) -> bool {
+    is_protected_system_path(path) || is_system_or_bundle_artifact(path)
+}
+
+pub fn purge_collected_paths(paths: &[String], move_to_trash: bool) -> PurgeCollectorResult {
     let mut deleted_count = 0usize;
     let mut freed_bytes = 0u64;
     let mut errors = Vec::new();
@@ -476,10 +633,12 @@ pub fn purge_collected_paths(paths: &[String]) -> PurgeCollectorResult {
         }
 
         let item_size = compute_path_size(p);
-        let res = if p.is_dir() {
-            fs::remove_dir_all(p)
+        let res = if move_to_trash {
+            crate::drives::move_path_to_macos_trash(p)
+        } else if p.is_dir() {
+            fs::remove_dir_all(p).map_err(|e| e.to_string())
         } else {
-            fs::remove_file(p)
+            fs::remove_file(p).map_err(|e| e.to_string())
         };
 
         match res {

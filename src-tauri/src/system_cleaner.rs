@@ -61,13 +61,6 @@ const TARGETS: &[TargetGhostConfig] = &[
         relative_to_home: "Library/Developer/CoreSimulator/Caches",
         description: "Données temporaires créées lors de l'exécution des simulateurs iOS, watchOS et tvOS.",
     },
-    TargetGhostConfig {
-        id: "xcode_archives",
-        name: "Archives temporaires de build Xcode",
-        category: "developer",
-        relative_to_home: "Library/Developer/Xcode/Archives",
-        description: "Historique d'archives de versions temporaires Xcode conservées localement.",
-    },
     // Package managers & build tools
     TargetGhostConfig {
         id: "gradle_cache",

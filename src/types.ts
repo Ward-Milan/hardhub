@@ -218,14 +218,6 @@ export interface SpeedTestResult {
   isUsb2Limited: boolean;
 }
 
-export interface FormatDriveResult {
-  bsdName: string;
-  newName: string;
-  fileSystem: string;
-  success: boolean;
-  message: string;
-}
-
 export interface DuplicateFileItem {
   path: string;
   name: string;
@@ -252,6 +244,8 @@ export interface DuplicateScanReport {
   totalWastedBytes: number;
   totalDuplicateFiles: number;
   scanDurationMs: number;
+  truncated?: boolean;
+  skippedProtectedCount?: number;
   groups: DuplicateGroup[];
 }
 
@@ -405,6 +399,14 @@ export interface SsdHealthReport {
   temperatureCelsius?: number | null;
   statusVerdict: string;
   statusAdvice: string;
+  telemetryScope: "lifetime_nvme_smart" | "session_only" | "unavailable" | string;
+  isLifetimeTelemetry: boolean;
+  percentageUsed?: number | null;
+  availableSpare?: number | null;
+  powerOnHours?: number | null;
+  powerCycles?: number | null;
+  unsafeShutdowns?: number | null;
+  criticalWarning?: number | null;
 }
 
 export interface LargeFileItem {
@@ -423,6 +425,7 @@ export interface LargeFilesReport {
   totalScannedFiles: number;
   matchedFilesCount: number;
   totalMatchedBytes: number;
+  truncated?: boolean;
   items: LargeFileItem[];
 }
 

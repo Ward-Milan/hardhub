@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  AlertTriangle,
   Sparkles,
   Trash2,
   Check,
@@ -8,16 +9,24 @@ import {
   History,
   HardDrive,
   Code2,
+  X,
 } from "lucide-react";
 import ScanningRadar from "./ScanningRadar";
 import type {
   GhostPurgeReport,
   GhostScanReport,
+  SnapshotPurgeResult,
   SnapshotReport,
   StorageDriveInfo,
   SystemGhostReport,
   SystemGhostPurgeReport,
 } from "./types";
+
+type PendingConfirmAction =
+  | { kind: "system_ghost"; count: number; bytes: number }
+  | { kind: "ghost"; count: number; bytes: number }
+  | { kind: "single_snapshot"; name: string; uuid: string }
+  | { kind: "all_snapshots"; count: number };
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 o";
@@ -69,6 +78,28 @@ export default function CleanerPurgeView({
   const [snapshotReport, setSnapshotReport] = useState<SnapshotReport | null>(null);
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
   const [isPurgingSnapshots, setIsPurgingSnapshots] = useState(false);
+
+  const [pendingAction, setPendingAction] =
+    useState<PendingConfirmAction | null>(null);
+  const [confirmIrreversible, setConfirmIrreversible] = useState(false);
+
+  const resetAllReports = () => {
+    setGhostReport(null);
+    setSystemGhostReport(null);
+    setSelectedGhostIds([]);
+    setSnapshotReport(null);
+  };
+
+  const handleAnalyzeAll = () => {
+    handleScanGhost(selectedMountPoint);
+    handleScanSnapshots(selectedMountPoint);
+    handleScanSystemGhost();
+  };
+
+  const openConfirmModal = (action: PendingConfirmAction) => {
+    setConfirmIrreversible(false);
+    setPendingAction(action);
+  };
 
   const filteredGhostItems = useMemo(() => {
     if (!systemGhostReport) return [];
@@ -170,28 +201,35 @@ export default function CleanerPurgeView({
   };
 
   const handleDeleteSnapshot = async (name: string, uuid: string) => {
+    setIsPurgingSnapshots(true);
     try {
-      await invoke("delete_single_snapshot_cmd", {
+      const res = await invoke<SnapshotPurgeResult>("delete_single_snapshot_cmd", {
         mountPoint: selectedMountPoint,
-        snapshotName: name,
-        snapshotUuid: uuid,
+        name,
+        uuid,
       });
-      onShowToast(`Instantané ${name} purgé.`);
+      onShowToast(res.message || `Instantané ${name} purgé.`);
       await handleScanSnapshots(selectedMountPoint);
       onRefreshDrives();
     } catch (err) {
       onShowError(String(err));
+    } finally {
+      setIsPurgingSnapshots(false);
     }
   };
 
   const handlePurgeAllSnapshots = async () => {
     setIsPurgingSnapshots(true);
     try {
-      const res = await invoke<number>("thin_and_purge_all_snapshots_cmd", {
-        mountPoint: selectedMountPoint,
-      });
+      const res = await invoke<SnapshotPurgeResult>(
+        "thin_and_purge_all_snapshots_cmd",
+        {
+          mountPoint: selectedMountPoint,
+        }
+      );
       onShowToast(
-        `Snapshots purgés : ${res} instantané(s) système Time Machine supprimé(s).`
+        res.message ||
+          `Snapshots purgés : ${res.deletedCount} instantané(s) système Time Machine supprimé(s).`
       );
       await handleScanSnapshots(selectedMountPoint);
       onRefreshDrives();
@@ -199,6 +237,21 @@ export default function CleanerPurgeView({
       onShowError(String(err));
     } finally {
       setIsPurgingSnapshots(false);
+    }
+  };
+
+  const handleConfirmPendingAction = async () => {
+    if (!pendingAction || !confirmIrreversible) return;
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action.kind === "system_ghost") {
+      await handlePurgeSystemGhost();
+    } else if (action.kind === "ghost") {
+      await handlePurgeGhost();
+    } else if (action.kind === "single_snapshot") {
+      await handleDeleteSnapshot(action.name, action.uuid);
+    } else if (action.kind === "all_snapshots") {
+      await handlePurgeAllSnapshots();
     }
   };
 
@@ -222,16 +275,16 @@ export default function CleanerPurgeView({
       .reduce((acc, c) => acc + c.itemCount, 0);
   }, [ghostReport, selectedCategories]);
 
-  // Initial load once on mount
-  useEffect(() => {
-    handleScanGhost(selectedMountPoint);
-    handleScanSnapshots(selectedMountPoint);
-    handleScanSystemGhost();
-  }, [selectedMountPoint]);
+  const hasAnyReport =
+    ghostReport !== null ||
+    systemGhostReport !== null ||
+    snapshotReport !== null;
+  const isAnyScanning =
+    isScanningGhost || isLoadingSnapshots || isScanningSystemGhost;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-6 space-y-6 bg-[#191919]">
-      {/* ================= TARGET DRIVE SELECTOR ================= */}
+      {/* TARGET DRIVE SELECTOR */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#282828]">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-[#9B9A97] mr-1">
@@ -244,7 +297,10 @@ export default function CleanerPurgeView({
               return (
                 <button
                   key={d.id}
-                  onClick={() => setSelectedMountPoint(d.mountPoint)}
+                  onClick={() => {
+                    setSelectedMountPoint(d.mountPoint);
+                    resetAllReports();
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-2 border transition-colors cursor-pointer ${
                     active
                       ? "bg-[#10B981]/20 border-[#10B981]/50 text-[#34D399]"
@@ -253,7 +309,7 @@ export default function CleanerPurgeView({
                 >
                   <HardDrive className="w-3.5 h-3.5" />
                   <span>
-                    {d.mountPoint === "/" ? `${d.name} (Système Mac)` : d.name}
+                    {d.mountPoint === "/" ? "Dossier Utilisateur (~)" : d.name}
                   </span>
                 </button>
               );
@@ -261,26 +317,50 @@ export default function CleanerPurgeView({
         </div>
 
         <button
-          onClick={() => {
-            handleScanGhost(selectedMountPoint);
-            handleScanSnapshots(selectedMountPoint);
-            handleScanSystemGhost();
-          }}
-          disabled={isScanningGhost || isLoadingSnapshots || isScanningSystemGhost}
-          className="px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-[#2B2B2B] border border-[#323232] text-xs text-[#9B9A97] hover:text-[#EDEDEC] flex items-center gap-1.5 cursor-pointer"
+          onClick={handleAnalyzeAll}
+          disabled={isAnyScanning}
+          className="px-3.5 py-1.5 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:opacity-50 text-xs font-semibold text-black flex items-center gap-1.5 cursor-pointer"
         >
           <RefreshCw
-            className={`w-3.5 h-3.5 ${
-              isScanningGhost || isLoadingSnapshots || isScanningSystemGhost
-                ? "animate-spin text-[#10B981]"
-                : ""
-            }`}
+            className={`w-3.5 h-3.5 ${isAnyScanning ? "animate-spin" : ""}`}
           />
-          <span>Réanalyser</span>
+          <span>
+            {isAnyScanning
+              ? "Analyse en cours…"
+              : hasAnyReport
+              ? "Réanalyser"
+              : "Analyser le support"}
+          </span>
         </button>
       </div>
 
-      {/* ================= CARDS CONTAINER ================= */}
+      {!hasAnyReport && !isAnyScanning && (
+        <div className="bg-[#202020] border border-[#2F2F2F] rounded-2xl p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F59E0B]/15 border border-[#F59E0B]/30 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5 text-[#F59E0B]" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold text-[#EDEDEC]">
+                Purge système, caches fantômes et instantanés APFS
+              </h3>
+              <p className="text-xs text-[#9B9A97] leading-relaxed">
+                L&apos;analyse inspecte les caches développeur (Xcode, npm, Homebrew), les fichiers fantômes (<span className="font-mono">._*</span>, <span className="font-mono">.Trashes</span>) et les instantanés locaux Time Machine. Les purges exécutées depuis cet onglet sont <strong className="text-[#FCA5A5]">irréversibles</strong> et demanderont votre confirmation explicite.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleAnalyzeAll}
+            className="px-4 py-2.5 rounded-xl bg-[#10B981] hover:bg-[#059669] text-black font-semibold text-xs flex items-center gap-2 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Analyser le support maintenant</span>
+          </button>
+        </div>
+      )}
+
+      {/* CARDS CONTAINER */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* CARD 0 (12 cols): NETTOYEUR ESPACE FANTÔME SYSTÈME */}
         <div className="lg:col-span-12 bg-[#202020] border border-[#2F2F2F] rounded-2xl p-5 flex flex-col justify-between gap-5">
@@ -439,7 +519,13 @@ export default function CleanerPurgeView({
               </span>
 
               <button
-                onClick={handlePurgeSystemGhost}
+                onClick={() =>
+                  openConfirmModal({
+                    kind: "system_ghost",
+                    count: selectedGhostIds.length,
+                    bytes: totalSelectedGhostBytes,
+                  })
+                }
                 disabled={isPurgingSystemGhost || selectedGhostIds.length === 0}
                 className="px-4 py-2 rounded-xl bg-[#6366F1] hover:bg-[#4F46E5] disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-[#6366F1]/10"
               >
@@ -550,7 +636,13 @@ export default function CleanerPurgeView({
             </span>
 
             <button
-              onClick={handlePurgeGhost}
+              onClick={() =>
+                openConfirmModal({
+                  kind: "ghost",
+                  count: selectedPurgeCount,
+                  bytes: selectedPurgeBytes,
+                })
+              }
               disabled={isPurgingGhost || selectedPurgeCount === 0}
               className="px-4 py-2 rounded-xl bg-[#10B981] hover:bg-[#059669] disabled:opacity-40 text-black font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
@@ -631,7 +723,13 @@ export default function CleanerPurgeView({
 
                     {s.isPurgeable && (
                       <button
-                        onClick={() => handleDeleteSnapshot(s.name, s.uuid)}
+                        onClick={() =>
+                          openConfirmModal({
+                            kind: "single_snapshot",
+                            name: s.name,
+                            uuid: s.uuid,
+                          })
+                        }
                         className="p-1.5 rounded-lg bg-[#141414] hover:bg-[#282828] text-[#787774] hover:text-[#EF4444] cursor-pointer shrink-0"
                         title="Purger cet instantané"
                       >
@@ -650,8 +748,17 @@ export default function CleanerPurgeView({
             </span>
 
             <button
-              onClick={handlePurgeAllSnapshots}
-              disabled={isPurgingSnapshots || (snapshotReport?.purgeableSnapshots === 0)}
+              onClick={() =>
+                openConfirmModal({
+                  kind: "all_snapshots",
+                  count: snapshotReport?.purgeableSnapshots || 0,
+                })
+              }
+              disabled={
+                isPurgingSnapshots ||
+                !snapshotReport ||
+                snapshotReport.purgeableSnapshots === 0
+              }
               className="px-4 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
             >
               <History className="w-3.5 h-3.5" />
@@ -664,6 +771,112 @@ export default function CleanerPurgeView({
           </div>
         </div>
       </div>
+
+      {/* CONFIRMATION MODAL FOR IRREVERSIBLE CLEANUP ACTIONS */}
+      {pendingAction && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#202020] border border-[#333333] rounded-2xl shadow-2xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-[#2C2C2C] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-[#EF4444]" />
+                <h3 className="text-sm font-semibold text-[#EDEDEC]">
+                  Confirmer la purge irréversible
+                </h3>
+              </div>
+              <button
+                onClick={() => setPendingAction(null)}
+                className="p-1 rounded-lg text-[#9B9A97] hover:text-[#EDEDEC] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3 rounded-xl bg-[#EF4444]/15 border border-[#EF4444]/40 text-xs text-[#FCA5A5] space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-[#EF4444]">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>ACTION IRRÉVERSIBLE — Sans passage par la Corbeille</span>
+                </div>
+                <p className="text-[11px] text-[#FCA5A5]/90">
+                  Les données supprimées ici ne peuvent pas être restaurées depuis la Corbeille.
+                </p>
+              </div>
+
+              <p className="text-xs text-[#9B9A97] leading-relaxed">
+                {pendingAction.kind === "system_ghost" && (
+                  <>
+                    Vous allez vider{" "}
+                    <strong className="text-[#EDEDEC]">
+                      {pendingAction.count} dossier(s) de caches système
+                    </strong>{" "}
+                    pour libérer{" "}
+                    <strong className="text-[#818CF8] font-mono">
+                      {formatBytes(pendingAction.bytes)}
+                    </strong>
+                    . Les caches applicatifs devront être régénérés au prochain lancement.
+                  </>
+                )}
+                {pendingAction.kind === "ghost" && (
+                  <>
+                    Vous allez supprimer définitivement{" "}
+                    <strong className="text-[#EDEDEC]">
+                      {pendingAction.count} élément(s) fantômes/caches
+                    </strong>{" "}
+                    ({formatBytes(pendingAction.bytes)}).
+                  </>
+                )}
+                {pendingAction.kind === "single_snapshot" && (
+                  <>
+                    Vous allez supprimer définitivement l&apos;instantané APFS{" "}
+                    <strong className="text-[#EDEDEC] font-mono">
+                      {pendingAction.name}
+                    </strong>{" "}
+                    de Time Machine. Vous ne pourrez plus restaurer cet état local antérieur.
+                  </>
+                )}
+                {pendingAction.kind === "all_snapshots" && (
+                  <>
+                    Vous allez purger définitivement{" "}
+                    <strong className="text-[#EDEDEC]">
+                      {pendingAction.count} instantané(s) local/locaux Time Machine
+                    </strong>{" "}
+                    sur ce volume.
+                  </>
+                )}
+              </p>
+
+              <label className="flex items-center gap-2 text-xs text-[#EDEDEC] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={confirmIrreversible}
+                  onChange={(e) => setConfirmIrreversible(e.target.checked)}
+                  className="accent-[#EF4444]"
+                />
+                <span>
+                  Je comprends que cette opération est définitive et irréversible
+                </span>
+              </label>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setPendingAction(null)}
+                  className="px-3 py-2 rounded-lg bg-[#282828] hover:bg-[#323232] text-xs text-[#9B9A97] cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleConfirmPendingAction}
+                  disabled={!confirmIrreversible}
+                  className="px-4 py-2 rounded-lg bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Confirmer la purge</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

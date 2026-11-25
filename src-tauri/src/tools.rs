@@ -3,7 +3,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,16 +42,6 @@ pub struct SpeedTestResult {
     pub tested_megabytes: usize,
     pub capability_verdict: String,
     pub is_usb2_limited: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FormatDriveResult {
-    pub bsd_name: String,
-    pub new_name: String,
-    pub file_system: String,
-    pub success: bool,
-    pub message: String,
 }
 
 struct GhostBucket {
@@ -153,8 +142,6 @@ fn collect_ghost_items_recursive(
             // Detect creative media render/cache folders
             if lower == "cacheclip"
                 || lower == "render files"
-                || lower == "optimized media"
-                || lower == "proxy media"
                 || lower == "adobe premiere pro media cache files"
                 || lower == "media cache files"
                 || lower == "peak files"
@@ -454,7 +441,16 @@ pub fn run_drive_speedtest(target_path: &str) -> Result<SpeedTestResult, String>
             .write(true)
             .truncate(true)
             .open(&bench_file_path)
-            .map_err(|e| format!("Impossible d'écrire sur ce support (lecture seule ?) : {}", e))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    format!(
+                        "Accès refusé par macOS (Permission denied / os error 13) sur '{}'. Autorisez HardHub dans Réglages Système > Confidentialité et sécurité > Fichiers et dossiers (Volumes amovibles) et Accès complet au disque, puis relancez HardHub.",
+                        resolved
+                    )
+                } else {
+                    format!("Impossible d'écrire sur ce support (lecture seule ?) : {}", e)
+                }
+            })?;
 
         unsafe {
             libc::fcntl(file.as_raw_fd(), libc::F_NOCACHE, 1);
@@ -524,83 +520,4 @@ pub fn run_drive_speedtest(target_path: &str) -> Result<SpeedTestResult, String>
         capability_verdict,
         is_usb2_limited,
     })
-}
-
-pub fn validate_safe_format_target(bsd_name: &str, mount_point: &str, is_removable: bool) -> Result<(), String> {
-    if !is_removable {
-        return Err("Sécurité HardHub : le formatage des disques internes est strictement verrouillé.".to_string());
-    }
-    if mount_point == "/" || mount_point.starts_with("/System") {
-        return Err("Sécurité HardHub : impossible de formater le volume système.".to_string());
-    }
-    if bsd_name.is_empty()
-        || bsd_name == "disk0"
-        || bsd_name.starts_with("disk0s")
-        || bsd_name == "disk1"
-        || bsd_name.starts_with("disk1s")
-        || bsd_name == "disk2"
-        || bsd_name.starts_with("disk2s")
-        || bsd_name == "disk3"
-        || bsd_name.starts_with("disk3s")
-    {
-        return Err(format!(
-            "Sécurité HardHub : le périphérique /dev/{} appartient au conteneur interne macOS.",
-            bsd_name
-        ));
-    }
-    Ok(())
-}
-
-pub fn format_external_drive(
-    bsd_name: &str,
-    mount_point: &str,
-    is_removable: bool,
-    file_system: &str,
-    new_volume_name: &str,
-) -> Result<FormatDriveResult, String> {
-    validate_safe_format_target(bsd_name, mount_point, is_removable)?;
-
-    let clean_name: String = new_volume_name
-        .trim()
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == ' ')
-        .take(24)
-        .collect();
-
-    if clean_name.is_empty() {
-        return Err("Veuillez saisir un nom de volume valide.".to_string());
-    }
-
-    let diskutil_fs = match file_system.to_uppercase().as_str() {
-        "APFS" => "APFS",
-        "EXFAT" => "ExFAT",
-        "FAT32" | "MS-DOS" => "MS-DOS",
-        _ => return Err(format!("Système de fichiers '{}' non supporté.", file_system)),
-    };
-
-    let dev_node = format!("/dev/{}", bsd_name);
-    let output = Command::new("/usr/sbin/diskutil")
-        .args(["eraseVolume", diskutil_fs, &clean_name, &dev_node])
-        .output()
-        .map_err(|e| format!("Échec d'exécution diskutil: {}", e))?;
-
-    if output.status.success() {
-        Ok(FormatDriveResult {
-            bsd_name: bsd_name.to_string(),
-            new_name: clean_name.clone(),
-            file_system: diskutil_fs.to_string(),
-            success: true,
-            message: format!(
-                "Volume formaté en {} sous le nom « {} ».",
-                diskutil_fs, clean_name
-            ),
-        })
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Err(format!(
-            "Formatage refusé par macOS : {}",
-            if !stderr.is_empty() { stderr } else { stdout }
-        ))
-    }
 }

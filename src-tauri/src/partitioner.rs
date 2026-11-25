@@ -110,7 +110,7 @@ pub fn parse_apfs_containers_text(output: &str) -> Vec<ApfsContainerInfo> {
                     .trim_start_matches("APFS Physical Store Disk:")
                     .trim()
                     .to_string();
-                c.is_internal = !store.starts_with("disk4") && !store.starts_with("disk5") && !store.starts_with("disk6");
+                c.is_internal = true;
                 c.physical_store = store;
             }
 
@@ -216,10 +216,23 @@ pub fn list_apfs_containers() -> Result<Vec<ApfsContainerInfo>, String> {
         .map_err(|e| format!("Erreur exécution diskutil: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_apfs_containers_text(&stdout))
+    let mut containers = parse_apfs_containers_text(&stdout);
+    for c in &mut containers {
+        let probe = if !c.physical_store.is_empty() {
+            c.physical_store.as_str()
+        } else {
+            c.container_id.as_str()
+        };
+        c.is_internal = crate::drives::is_bsd_disk_internal_or_system(probe).unwrap_or(true);
+    }
+    Ok(containers)
 }
 
 pub fn add_apfs_volume(req: AddVolumeRequest) -> Result<PartitionActionResult, String> {
+    if !crate::drives::is_valid_bsd_name(&req.container_id) {
+        return Err("Identifiant de conteneur APFS invalide.".to_string());
+    }
+
     let clean_name: String = req
         .volume_name
         .trim()
@@ -256,13 +269,32 @@ pub fn add_apfs_volume(req: AddVolumeRequest) -> Result<PartitionActionResult, S
         }
     }
 
-    if let Some(pwd) = req.passphrase {
-        if !pwd.trim().is_empty() {
-            cmd.args(["-passphrase", pwd.trim()]);
-        }
-    }
+    let clean_pwd = req
+        .passphrase
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
 
-    let output = cmd.output().map_err(|e| format!("Erreur diskutil: {}", e))?;
+    let output = if let Some(pwd) = clean_pwd {
+        cmd.arg("-stdinpassphrase")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Impossible de démarrer diskutil: {}", e))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(pwd.as_bytes());
+            let _ = stdin.write_all(b"\n");
+        }
+        child
+            .wait_with_output()
+            .map_err(|e| format!("Erreur diskutil: {}", e))?
+    } else {
+        cmd.output().map_err(|e| format!("Erreur diskutil: {}", e))?
+    };
 
     if output.status.success() {
         Ok(PartitionActionResult {
@@ -274,22 +306,54 @@ pub fn add_apfs_volume(req: AddVolumeRequest) -> Result<PartitionActionResult, S
         })
     } else {
         let err = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Échec de création du volume APFS : {}", err.trim()))
+        let raw_err = err.trim();
+        if raw_err.contains("-69464") || raw_err.to_ascii_lowercase().contains("restricted by sandbox") {
+            return Err(format!(
+                "Autorisation macOS requise (-69464) : activez HardHub dans Réglages Système > Confidentialité et sécurité > Accès complet au disque et Fichiers et dossiers, puis relancez HardHub. ({})",
+                raw_err
+            ));
+        }
+        Err(format!("Échec de création du volume APFS : {}", raw_err))
     }
 }
 
 pub fn delete_apfs_volume(bsd_name: &str, mount_point: &str) -> Result<PartitionActionResult, String> {
+    if !crate::drives::is_valid_bsd_name(bsd_name) {
+        return Err("Identifiant de volume APFS invalide.".to_string());
+    }
     if mount_point == "/" || mount_point.starts_with("/System") {
         return Err("Sécurité macOS : impossible de supprimer le volume système actif.".to_string());
     }
 
-    if bsd_name.is_empty()
-        || bsd_name == "disk3s1"
-        || bsd_name == "disk3s5"
-        || bsd_name == "disk1s1"
-        || bsd_name == "disk0s1"
+    if let Ok(info_out) = Command::new("/usr/sbin/diskutil")
+        .args(["info", bsd_name])
+        .output()
     {
-        return Err(format!("Sécurité : suppression refusée sur le volume système {}.", bsd_name));
+        let info_text = String::from_utf8_lossy(&info_out.stdout);
+        for line in info_text.lines() {
+            let trimmed = line.trim();
+            if let Some((k, v)) = trimmed.split_once(':') {
+                let key = k.trim();
+                let val = v.trim();
+                if key == "Mount Point" && (val == "/" || val.starts_with("/System")) {
+                    return Err("Sécurité macOS : suppression refusée sur un volume système.".to_string());
+                }
+                if key.contains("Role") {
+                    let role_lower = val.to_ascii_lowercase();
+                    if role_lower.contains("system")
+                        || role_lower.contains("preboot")
+                        || role_lower.contains("recovery")
+                        || role_lower.contains("vm")
+                        || role_lower.contains("data")
+                    {
+                        return Err(format!(
+                            "Sécurité macOS : le volume {} possède le rôle système protégé ({}).",
+                            bsd_name, val
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     let output = Command::new("/usr/sbin/diskutil")
@@ -304,7 +368,14 @@ pub fn delete_apfs_volume(bsd_name: &str, mount_point: &str) -> Result<Partition
         })
     } else {
         let err = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Échec de suppression du volume : {}", err.trim()))
+        let raw_err = err.trim();
+        if raw_err.contains("-69464") || raw_err.to_ascii_lowercase().contains("restricted by sandbox") {
+            return Err(format!(
+                "Autorisation macOS requise (-69464) : activez HardHub dans Réglages Système > Confidentialité et sécurité > Accès complet au disque et Fichiers et dossiers, puis relancez HardHub. ({})",
+                raw_err
+            ));
+        }
+        Err(format!("Échec de suppression du volume : {}", raw_err))
     }
 }
 
@@ -313,24 +384,16 @@ pub fn split_dual_partition(req: SplitPartitionRequest) -> Result<PartitionActio
         return Err("Sécurité HardHub : le partitionnement hybride est strictement réservé aux disques externes.".to_string());
     }
 
-    let raw_dev = req.parent_disk.trim_start_matches("/dev/");
-    let base_dev = if let Some(idx) = raw_dev.find('s') {
-        if idx >= 4 && raw_dev.starts_with("disk") {
-            &raw_dev[..idx]
-        } else {
-            raw_dev
-        }
-    } else {
-        raw_dev
-    };
+    let raw_dev = req.parent_disk.trim().trim_start_matches("/dev/");
+    let resolved_dev = crate::drives::resolve_physical_whole_disk(raw_dev)
+        .unwrap_or_else(|| crate::drives::extract_base_whole_disk(raw_dev));
+    let base_dev = resolved_dev.as_str();
 
-    if base_dev.is_empty()
-        || base_dev == "disk0"
-        || base_dev == "disk1"
-        || base_dev == "disk2"
-        || base_dev == "disk3"
-    {
-        return Err("Sécurité : partitionnement refusé sur le disque interne.".to_string());
+    if !crate::drives::is_valid_bsd_name(base_dev) {
+        return Err("Identifiant de disque parent invalide.".to_string());
+    }
+    if crate::drives::is_bsd_disk_internal_or_system(base_dev)? {
+        return Err("Sécurité : partitionnement refusé sur le disque interne ou non vérifié.".to_string());
     }
 
     let p1_pct = req.partition1_pct.clamp(10, 90);
@@ -345,8 +408,23 @@ pub fn split_dual_partition(req: SplitPartitionRequest) -> Result<PartitionActio
         _ => "APFS",
     };
 
-    let p1_name = req.partition1_name.trim();
-    let p2_name = req.partition2_name.trim();
+    let clean_vol_name = |raw: &str, fallback: &str| -> String {
+        let cleaned: String = raw
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == ' ')
+            .take(24)
+            .collect();
+        let trimmed = cleaned.trim_start_matches('-').trim();
+        if trimmed.is_empty() {
+            fallback.to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
+
+    let p1_name = clean_vol_name(&req.partition1_name, "Mac_Data");
+    let p2_name = clean_vol_name(&req.partition2_name, "PC_CrossShared");
 
     let output = Command::new("/usr/sbin/diskutil")
         .args([
@@ -354,10 +432,10 @@ pub fn split_dual_partition(req: SplitPartitionRequest) -> Result<PartitionActio
             &format!("/dev/{}", base_dev),
             "GPT",
             p1_fs,
-            if p1_name.is_empty() { "Mac_Data" } else { p1_name },
+            &p1_name,
             &format!("{}%", p1_pct),
             p2_fs,
-            if p2_name.is_empty() { "PC_CrossShared" } else { p2_name },
+            &p2_name,
             &format!("{}%", p2_pct),
         ])
         .output()
@@ -374,10 +452,14 @@ pub fn split_dual_partition(req: SplitPartitionRequest) -> Result<PartitionActio
     } else {
         let err = String::from_utf8_lossy(&output.stderr);
         let out = String::from_utf8_lossy(&output.stdout);
-        Err(format!(
-            "Échec du partitionnement : {}",
-            if !err.trim().is_empty() { err.trim() } else { out.trim() }
-        ))
+        let raw_err = if !err.trim().is_empty() { err.trim() } else { out.trim() };
+        if raw_err.contains("-69464") || raw_err.to_ascii_lowercase().contains("restricted by sandbox") {
+            return Err(format!(
+                "Autorisation macOS requise (-69464) : activez HardHub dans Réglages Système > Confidentialité et sécurité > Accès complet au disque et Fichiers et dossiers, puis relancez HardHub. ({})",
+                raw_err
+            ));
+        }
+        Err(format!("Échec du partitionnement : {}", raw_err))
     }
 }
 
@@ -387,16 +469,10 @@ pub fn encrypt_apfs_volume(bsd_name: &str, passphrase: &str) -> Result<Partition
     }
 
     let raw_bsd = bsd_name.trim().trim_start_matches("/dev/");
-    if raw_bsd.is_empty()
-        || raw_bsd == "disk0"
-        || raw_bsd == "disk1"
-        || raw_bsd == "disk2"
-        || raw_bsd == "disk3"
-        || raw_bsd.starts_with("disk0s")
-        || raw_bsd.starts_with("disk1s")
-        || raw_bsd.starts_with("disk2s")
-        || raw_bsd.starts_with("disk3s")
-    {
+    if !crate::drives::is_valid_bsd_name(raw_bsd) {
+        return Err("Identifiant de volume BSD invalide.".to_string());
+    }
+    if crate::drives::is_bsd_disk_internal_or_system(raw_bsd)? {
         return Err("Sécurité HardHub : impossible de chiffrer le disque système interne via cet outil.".to_string());
     }
 
@@ -426,6 +502,12 @@ pub fn encrypt_apfs_volume(bsd_name: &str, passphrase: &str) -> Result<Partition
         let err = String::from_utf8_lossy(&output.stderr);
         let out = String::from_utf8_lossy(&output.stdout);
         let details = if !err.trim().is_empty() { err.trim() } else { out.trim() };
+        if details.contains("-69464") || details.to_ascii_lowercase().contains("restricted by sandbox") {
+            return Err(format!(
+                "Autorisation macOS requise (-69464) : activez HardHub dans Réglages Système > Confidentialité et sécurité > Accès complet au disque et Fichiers et dossiers, puis relancez HardHub. ({})",
+                details
+            ));
+        }
         Err(format!("Échec du chiffrement du volume : {}", details))
     }
 }

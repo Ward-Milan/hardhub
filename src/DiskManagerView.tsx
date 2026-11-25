@@ -8,10 +8,7 @@ import {
   Lock,
   Unlock,
   ShieldCheck,
-  AlertTriangle,
-  Info,
   X,
-  CheckCircle2,
   HardDrive,
   RefreshCw,
   FolderPlus,
@@ -21,7 +18,6 @@ import {
   ApfsContainerInfo,
   ApfsVolumeItem,
   PartitionActionResult,
-  FormatDriveResult,
 } from "./types";
 
 interface DiskManagerViewProps {
@@ -46,7 +42,7 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
   onRefreshDrives,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    "apfs_volume" | "hybrid_split" | "format_single"
+    "apfs_volume" | "hybrid_split"
   >("apfs_volume");
 
   // APFS Containers
@@ -70,17 +66,13 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
   const [volumeConfirmPassphrase, setVolumeConfirmPassphrase] = useState("");
   const [isEncryptingVolume, setIsEncryptingVolume] = useState(false);
 
-  // Removable drives for formatting / partitioning
+  // Removable drives for hybrid partitioning
   const externalRemovableDrives = useMemo(
     () => drives.filter((d) => d.isRemovable),
     [drives]
   );
 
   const [formatTargetId, setFormatTargetId] = useState<string>("");
-  const [formatFs, setFormatFs] = useState<"ExFAT" | "APFS" | "FAT32">("ExFAT");
-  const [formatVolumeName, setFormatVolumeName] = useState<string>("UNTITLED");
-  const [confirmFormatModal, setConfirmFormatModal] = useState(false);
-  const [isFormatting, setIsFormatting] = useState(false);
 
   // Hybrid Split state
   const [hybridSplitPct, setHybridSplitPct] = useState<number>(50);
@@ -116,7 +108,6 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
   useEffect(() => {
     if (externalRemovableDrives.length > 0 && !formatTargetId) {
       setFormatTargetId(externalRemovableDrives[0].id);
-      setFormatVolumeName(externalRemovableDrives[0].name.slice(0, 20));
     }
   }, [externalRemovableDrives, formatTargetId]);
 
@@ -182,27 +173,6 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
     }
   };
 
-  const handleExecuteFormat = async () => {
-    if (!selectedFormatDrive) return;
-    setIsFormatting(true);
-    try {
-      const res = await invoke<FormatDriveResult>("format_removable_drive", {
-        bsdName: selectedFormatDrive.bsdName,
-        mountPoint: selectedFormatDrive.mountPoint,
-        isRemovable: selectedFormatDrive.isRemovable,
-        fileSystem: formatFs,
-        newVolumeName: formatVolumeName,
-      });
-      setConfirmFormatModal(false);
-      onShowToast(res.message);
-      onRefreshDrives();
-    } catch (err) {
-      onShowError(String(err));
-    } finally {
-      setIsFormatting(false);
-    }
-  };
-
   const handleExecuteSplit = async () => {
     if (!selectedFormatDrive) return;
     setIsSplitting(true);
@@ -241,10 +211,9 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
     }
     setIsEncryptingVolume(true);
     try {
-      const res = await invoke<{ success: boolean; message: string }>(
-        "encrypt_apfs_drive_cmd",
+      const res = await invoke<PartitionActionResult>(
+        "encrypt_external_volume_cmd",
         {
-          mountPoint: encryptVolumeTarget.mountPoint,
           bsdName: encryptVolumeTarget.bsdName,
           passphrase: volumePassphrase,
         }
@@ -273,10 +242,10 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
         <div>
           <h2 className="text-xl font-bold text-[#EDEDEC] flex items-center gap-2">
             <Layers className="w-5 h-5 text-[#8B5CF6]" />
-            <span>Disques &amp; Formatage</span>
+            <span>Disques &amp; Partitions</span>
           </h2>
           <p className="text-xs text-[#9B9A97]">
-            Gestion des conteneurs APFS, volumes dynamiques, double partition hybride et formateur express
+            Gestion des conteneurs APFS, volumes dynamiques et double partition hybride
           </p>
         </div>
 
@@ -303,17 +272,6 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
           >
             <Split className="w-3.5 h-3.5 text-[#FBBF24]" />
             <span>Hybride Mac &amp; PC</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("format_single")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
-              activeTab === "format_single"
-                ? "bg-[#252525] text-[#EDEDEC] shadow-sm font-semibold"
-                : "text-[#787774] hover:text-[#9B9A97]"
-            }`}
-          >
-            <HardDrive className="w-3.5 h-3.5 text-[#10B981]" />
-            <span>Formateur Express</span>
           </button>
         </div>
       </div>
@@ -699,183 +657,6 @@ export const DiskManagerView: React.FC<DiskManagerViewProps> = ({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* TAB 3: SIMPLE 1-CLICK FORMAT */}
-      {activeTab === "format_single" && (
-        <div className="bg-[#202020] border border-[#2F2F2F] rounded-2xl p-6 space-y-6">
-          <div className="flex items-center gap-3 pb-4 border-b border-[#2A2A2A]">
-            <div className="w-10 h-10 rounded-xl bg-[#10B981]/15 border border-[#10B981]/30 flex items-center justify-center">
-              <HardDrive className="w-5 h-5 text-[#34D399]" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[#EDEDEC]">
-                Formateur Express 1-Clic
-              </h3>
-              <p className="text-xs text-[#9B9A97]">
-                Formatage propre et optimise pour supports externes, cles USB et cartes SD
-              </p>
-            </div>
-          </div>
-
-          {externalRemovableDrives.length === 0 ? (
-            <div className="p-8 rounded-xl bg-[#161616] border border-[#282828] text-xs text-[#787774] text-center space-y-2">
-              <HardDrive className="w-8 h-8 text-[#555555] mx-auto" />
-              <p className="font-semibold text-sm text-[#EDEDEC]">
-                Aucun support amovible detecte
-              </p>
-              <p className="text-xs max-w-md mx-auto">
-                Branchez un disque externe, une cle USB ou une carte SD pour debloquer le formateur express.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {/* Drive selector */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#9B9A97]">
-                  Support amovible a formater
-                </label>
-                <select
-                  value={formatTargetId}
-                  onChange={(e) => {
-                    setFormatTargetId(e.target.value);
-                    const d = externalRemovableDrives.find((x) => x.id === e.target.value);
-                    if (d) setFormatVolumeName(d.name.slice(0, 20));
-                  }}
-                  className="w-full px-3 py-2 rounded-xl bg-[#161616] border border-[#303030] text-xs text-[#EDEDEC] focus:outline-none"
-                >
-                  {externalRemovableDrives.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} (/dev/{d.bsdName} • {formatBytes(d.totalBytes)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Filesystem options */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#9B9A97]">
-                  Profil du systeme de fichiers
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {(
-                    [
-                      {
-                        id: "ExFAT",
-                        label: "ExFAT Universel",
-                        sub: "Recommande pour Camera, Mac & PC sans limite de taille de fichier 4Go",
-                      },
-                      {
-                        id: "APFS",
-                        label: "APFS Apple",
-                        sub: "Performance maximale macOS SSD, snapshots et chiffrement natif",
-                      },
-                      {
-                        id: "FAT32",
-                        label: "FAT32 Classique",
-                        sub: "Compatibilite maximale autoradio, anciennes TV et consoles vintage",
-                      },
-                    ] as const
-                  ).map((opt) => (
-                    <button
-                      key={opt.id}
-                      onClick={() => setFormatFs(opt.id)}
-                      className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
-                        formatFs === opt.id
-                          ? "bg-[#10B981]/15 border-[#10B981]/50 text-[#EDEDEC]"
-                          : "bg-[#171717] border-[#2A2A2A] text-[#9B9A97] hover:border-[#383838]"
-                      }`}
-                    >
-                      <div className="text-xs font-bold text-[#EDEDEC] flex items-center justify-between">
-                        <span>{opt.label}</span>
-                        {formatFs === opt.id && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981]" />
-                        )}
-                      </div>
-                      <div className="text-[11px] text-[#787774] mt-1">
-                        {opt.sub}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Volume name */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#9B9A97]">
-                  Nom du nouveau volume
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={formatVolumeName}
-                    onChange={(e) => setFormatVolumeName(e.target.value)}
-                    placeholder="Nom du volume"
-                    maxLength={24}
-                    className="flex-1 px-3 py-2 rounded-xl bg-[#161616] border border-[#303030] text-xs text-[#EDEDEC] font-mono focus:outline-none"
-                  />
-                  <button
-                    onClick={() => setConfirmFormatModal(true)}
-                    className="px-5 py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#D97706] text-black font-semibold text-xs cursor-pointer shrink-0 shadow-sm"
-                  >
-                    Formater le disque...
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* MODAL: CONFIRM FORMAT */}
-      {confirmFormatModal && selectedFormatDrive && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#202020] border border-[#EF4444]/40 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#EF4444]/15 border border-[#EF4444]/30 flex items-center justify-center text-[#EF4444]">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-[#EDEDEC]">
-                  Confirmer le formatage
-                </h3>
-                <p className="text-xs text-[#9B9A97]">
-                  Action irreversible sur le disque amovible
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-[#171717] border border-[#2B2B2B] text-xs space-y-1.5">
-              <p className="text-[#EDEDEC]">
-                Support cible : <strong className="font-mono">{selectedFormatDrive.name}</strong> ({selectedFormatDrive.bsdName})
-              </p>
-              <p className="text-[#9B9A97]">
-                Nouveau systeme : <strong className="text-[#10B981]">{formatFs}</strong> (Nom : &laquo; {formatVolumeName} &raquo;)
-              </p>
-              <p className="text-[#EF4444] font-semibold pt-1">
-                Toutes les donnees presentes sur ce support amovible seront definitivement effacees.
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                onClick={() => setConfirmFormatModal(false)}
-                disabled={isFormatting}
-                className="px-4 py-2 rounded-xl bg-[#282828] hover:bg-[#323232] text-xs font-medium text-[#EDEDEC] cursor-pointer"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={handleExecuteFormat}
-                disabled={isFormatting}
-                className="px-4 py-2 rounded-xl bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-50 text-white font-semibold text-xs cursor-pointer flex items-center gap-1.5 shadow-sm"
-              >
-                {isFormatting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                <span>{isFormatting ? "Formatage en cours..." : "Oui, effacer et formater"}</span>
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
