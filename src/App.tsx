@@ -14,7 +14,6 @@ import {
   FolderArchive,
   Sparkles,
   Activity,
-  Layers,
   Shield,
 } from "lucide-react";
 import { HardHubLogo, EjectSvgIcon } from "./Logo";
@@ -38,7 +37,6 @@ import LargeFilesView from "./LargeFilesView";
 import UninstallerView from "./UninstallerView";
 import CleanerPurgeView from "./CleanerPurgeView";
 import DiagnosticsView from "./DiagnosticsView";
-import { DiskManagerView } from "./DiskManagerView";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<HardHubTab>("drives");
@@ -322,7 +320,6 @@ export default function App() {
     { id: "uninstaller", label: "Désinstallateur", icon: Package, activeColor: "text-[#06B6D4]" },
     { id: "cleaner", label: "Nettoyage & Purge", icon: Sparkles, activeColor: "text-[#10B981]" },
     { id: "diagnostics", label: "Santé & Débit", icon: Activity, activeColor: "text-[#06B6D4]" },
-    { id: "disks", label: "Disques & APFS", icon: Layers, activeColor: "text-[#8B5CF6]" },
   ];
 
   return (
@@ -542,15 +539,6 @@ export default function App() {
 
           {activeTab === "diagnostics" && (
             <DiagnosticsView drives={drives} onShowToast={showToast} onShowError={(err) => setErrorBanner(err)} />
-          )}
-
-          {activeTab === "disks" && (
-            <DiskManagerView
-              drives={drives}
-              onShowToast={showToast}
-              onShowError={(err) => setErrorBanner(err)}
-              onRefreshDrives={refreshDrives}
-            />
           )}
         </main>
       </div>

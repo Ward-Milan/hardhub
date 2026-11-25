@@ -6,8 +6,7 @@ export type HardHubTab =
   | "largefiles"
   | "uninstaller"
   | "cleaner"
-  | "diagnostics"
-  | "disks";
+  | "diagnostics";
 
 export type StorageDrive = StorageDriveInfo;
 
@@ -312,46 +311,6 @@ export interface SnapshotPurgeResult {
   deletedCount: number;
   message: string;
   success: boolean;
-}
-
-export interface ApfsVolumeItem {
-  bsdName: string;
-  name: string;
-  mountPoint: string;
-  role: string;
-  capacityConsumedBytes: number;
-  isEncrypted: boolean;
-  isSystemLocked: boolean;
-}
-
-export interface ApfsContainerInfo {
-  containerId: string;
-  totalBytes: number;
-  usedBytes: number;
-  freeBytes: number;
-  physicalStore: string;
-  isInternal: boolean;
-  volumes: ApfsVolumeItem[];
-}
-
-export interface AddVolumeRequest {
-  containerId: string;
-  volumeName: string;
-  volumeFormat: string;
-  roleType: string;
-  quotaGb?: number | null;
-  reserveGb?: number | null;
-  passphrase?: string | null;
-}
-
-export interface SplitPartitionRequest {
-  parentDisk: string;
-  isRemovable: boolean;
-  partition1Name: string;
-  partition1Fs: string;
-  partition1Pct: number;
-  partition2Name: string;
-  partition2Fs: string;
 }
 
 export interface PartitionActionResult {

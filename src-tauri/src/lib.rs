@@ -25,10 +25,7 @@ use duplicates::{
 use eject_doctor::{
     inspect_blocking_processes, safe_force_eject_drive, BlockingProcessInfo, EjectReport,
 };
-use partitioner::{
-    add_apfs_volume, delete_apfs_volume, encrypt_apfs_volume, list_apfs_containers, split_dual_partition,
-    AddVolumeRequest, ApfsContainerInfo, PartitionActionResult, SplitPartitionRequest,
-};
+use partitioner::{encrypt_apfs_volume, PartitionActionResult};
 use serde::{Deserialize, Serialize};
 use snapshots::{
     delete_single_snapshot, list_volume_snapshots, thin_and_purge_all_snapshots,
@@ -283,39 +280,6 @@ async fn thin_and_purge_all_snapshots_cmd(mount_point: String) -> Result<Snapsho
 }
 
 #[tauri::command]
-async fn list_apfs_containers_cmd() -> Result<Vec<ApfsContainerInfo>, String> {
-    tokio::task::spawn_blocking(list_apfs_containers)
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn add_apfs_volume_cmd(req: AddVolumeRequest) -> Result<PartitionActionResult, String> {
-    tokio::task::spawn_blocking(move || add_apfs_volume(req))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn delete_apfs_volume_cmd(
-    bsd_name: String,
-    mount_point: String,
-) -> Result<PartitionActionResult, String> {
-    tokio::task::spawn_blocking(move || delete_apfs_volume(&bsd_name, &mount_point))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn split_dual_partition_cmd(
-    req: SplitPartitionRequest,
-) -> Result<PartitionActionResult, String> {
-    tokio::task::spawn_blocking(move || split_dual_partition(req))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
 async fn run_flash_test_cmd(
     app: tauri::AppHandle,
     mount_point: String,
@@ -532,10 +496,6 @@ pub fn run() {
             list_volume_snapshots_cmd,
             delete_single_snapshot_cmd,
             thin_and_purge_all_snapshots_cmd,
-            list_apfs_containers_cmd,
-            add_apfs_volume_cmd,
-            delete_apfs_volume_cmd,
-            split_dual_partition_cmd,
             run_flash_test_cmd,
             get_ssd_health_cmd,
             scan_large_files_cmd,
